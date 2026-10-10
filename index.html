@@ -1,0 +1,3292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Query Ledger — Mobile Web App</title>
+
+<!-- PWA Meta Tags -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Query Ledger">
+<meta name="theme-color" content="#132039">
+
+<!-- Web App Manifest (Data URI) -->
+<link rel="manifest" href='data:application/manifest+json,{"name":"Query Ledger App","short_name":"QueryLedger","start_url":".","display":"standalone","background_color":"#132039","theme_color":"#132039","icons":[{"src":"data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22%3E%3Crect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%23132039%22/%3E%3Cpath d=%22M30 30h40v40H30z%22 fill=%22%23A8752E%22/%3E%3C/svg%22","sizes":"192x192 512x512","type":"image/svg+xml"}]}'>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<style>
+  :root{
+    --ink-navy:#132039;
+    --ink-navy-2:#1b2c4d;
+    --paper:#F5F3EC;
+    --paper-card:#FCFBF7;
+    --line:#DBD3BF;
+    --line-soft:#E7E1D2;
+    --ink:#1C2430;
+    --ink-soft:#5B6472;
+    --brass:#A8752E;
+    --brass-soft:#E9DCC2;
+    --green:#1F7A4D;
+    --green-soft:#DEEDE3;
+    --red:#B3382C;
+    --red-soft:#F5DFDB;
+    --amber:#B8863B;
+    --amber-soft:#F1E4C9;
+    --shadow: 0 1px 3px rgba(19,32,57,0.08), 0 8px 24px -12px rgba(19,32,57,0.18);
+    --radius: 10px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0; height:100%;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Inter',sans-serif;
+    -webkit-font-smoothing:antialiased;
+    min-height:100vh;
+  }
+  .num{font-family:'IBM Plex Mono',monospace; font-variant-numeric:tabular-nums;}
+  h1,h2,h3,.display{font-family:'Fraunces',serif;}
+
+  /* Mobile Header */
+  .mobile-bar{
+    display:none;
+    align-items:center; justify-content:space-between;
+    background:var(--ink-navy); color:#F3EAD2;
+    padding:12px 16px; position:sticky; top:0; z-index:90;
+    border-bottom:1px solid rgba(237,231,216,0.14);
+  }
+  .mobile-bar .brand{font-family:'Fraunces',serif; font-weight:700; font-size:18px;}
+  .mobile-bar button{
+    background:transparent; border:none; color:#F3EAD2; font-size:22px; cursor:pointer; padding:4px 8px;
+  }
+
+  .shell{display:flex; min-height:100vh;}
+
+  #loginGate{
+    position:fixed; inset:0; z-index:1000;
+    background:linear-gradient(180deg, var(--ink-navy) 0%, var(--ink-navy-2) 100%);
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  #loginGate.hidden{display:none;}
+  .login-card{
+    background:var(--paper-card); border-radius:var(--radius); padding:32px 28px 26px;
+    width:100%; max-width:340px; box-shadow:var(--shadow);
+  }
+  .login-card .mark{font-family:'Fraunces',serif; font-weight:700; font-size:24px; color:var(--ink-navy); margin-bottom:4px;}
+  .login-card .sub{font-size:13px; color:var(--ink-soft); margin-bottom:20px;}
+  .login-card .field{margin-bottom:14px; display:flex; flex-direction:column; gap:6px;}
+  .login-card .field label{font-size:12px; font-weight:600; color:var(--ink-soft);}
+  .login-card .field input{
+    padding:11px 12px; border:1px solid var(--line); border-radius:7px; background:#fff;
+    font-family:'Inter',sans-serif; font-size:15px; color:var(--ink);
+  }
+  .login-card .field input:focus{outline:2px solid var(--brass); outline-offset:1px; border-color:var(--brass);}
+  .login-error{
+    background:var(--red-soft); color:var(--red); padding:10px 12px; border-radius:7px;
+    font-size:13px; margin-bottom:14px; display:none;
+  }
+  .login-error.show{display:block;}
+  .save-lock{
+    position:fixed; inset:0; z-index:2000; display:flex; align-items:center; justify-content:center;
+    background:rgba(19,32,57,0.38); cursor:wait;
+  }
+  .save-lock[hidden]{display:none;}
+  .save-lock-box{
+    display:flex; align-items:center; gap:12px; background:var(--paper-card); color:var(--ink);
+    padding:16px 22px; border-radius:var(--radius); box-shadow:var(--shadow); font-weight:600; font-size:14px;
+  }
+  .save-spinner{
+    width:18px; height:18px; border-radius:50%; border:3px solid var(--line); border-top-color:var(--brass);
+    animation:saveSpin .8s linear infinite;
+  }
+  @keyframes saveSpin{to{transform:rotate(360deg);}}
+  .pw-toggle{
+    position:absolute; right:6px; top:33px; width:30px; height:30px; border:none; background:transparent;
+    font-size:16px; cursor:pointer; display:flex; align-items:center; justify-content:center; border-radius:6px;
+  }
+  .pw-toggle:hover{background:var(--brass-soft, #E9DCC2);}
+
+  .spine-overlay{
+    display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:95;
+  }
+  .spine-overlay.open{display:block;}
+
+  .spine{
+    width:230px; flex-shrink:0;
+    background:linear-gradient(180deg, var(--ink-navy) 0%, var(--ink-navy-2) 100%);
+    color:#EDE7D8;
+    display:flex; flex-direction:column;
+    position:sticky; top:0; height:100vh; z-index:96;
+    overflow-y:auto;
+  }
+  .spine-brand{padding:24px 20px 18px; border-bottom:1px solid rgba(237,231,216,0.14);}
+  .spine-brand .mark{font-family:'Fraunces',serif; font-weight:700; font-size:20px; letter-spacing:0.02em; color:#F3EAD2;}
+  .spine-brand .sub{font-size:11px; letter-spacing:0.1em; text-transform:uppercase; color:#9AA6BC; margin-top:4px;}
+  .spine-nav{padding:14px 12px; display:flex; flex-direction:column; gap:4px; flex:1;}
+  .spine-tab{
+    display:flex; align-items:center; gap:10px; padding:12px 14px; border-radius:8px;
+    color:#C7CEDC; text-decoration:none; cursor:pointer; font-size:14px; font-weight:500;
+    border-left:3px solid transparent; transition:background .15s, color .15s;
+    background:none; border-top:none; border-right:none; border-bottom:none; width:100%; text-align:left;
+  }
+  .spine-tab:hover{background:rgba(237,231,216,0.06); color:#F3EAD2;}
+  .spine-tab.active{background:rgba(168,117,46,0.22); color:#F3EAD2; border-left:3px solid var(--brass); font-weight:600;}
+  .spine-tab .ic{width:18px; text-align:center; opacity:.85; font-size:15px;}
+  .pending-badge{
+    background:var(--red); color:#fff; font-size:11px; font-weight:700; border-radius:999px;
+    padding:1px 7px; margin-left:auto;
+  }
+  .spine-foot{padding:16px 18px 20px; border-top:1px solid rgba(237,231,216,0.14); font-size:11px; color:#8894A8;}
+  .spine-foot input{
+    width:100%; margin-top:6px; padding:8px 10px; border-radius:6px; border:1px solid rgba(237,231,216,0.2);
+    background:rgba(255,255,255,0.06); color:#F3EAD2; font-size:13px; font-family:'Inter',sans-serif;
+  }
+  .spine-foot input::placeholder{color:#7C879C;}
+  .sheet-connect{margin-top:16px; padding-top:14px; border-top:1px solid rgba(237,231,216,0.14);}
+  .sheet-connect-label{font-size:10.5px; letter-spacing:0.08em; text-transform:uppercase; color:#9AA6BC; margin-bottom:6px;}
+  .sheet-connect input{
+    width:100%; padding:8px 10px; border-radius:6px; border:1px solid rgba(237,231,216,0.2);
+    background:rgba(255,255,255,0.06); color:#F3EAD2; font-size:11px; font-family:'IBM Plex Mono',monospace;
+    margin-bottom:8px;
+  }
+  .sheet-btn{width:100%; justify-content:center; background:rgba(255,255,255,0.08); color:#EDE7D8; border:1px solid rgba(237,231,216,0.2); font-size:12px; padding:8px 10px; border-radius:6px; cursor:pointer;}
+  .sheet-btn:hover{background:rgba(255,255,255,0.14);}
+  .sheet-status{font-size:11px; color:#8894A8; margin-top:8px; line-height:1.4;}
+  .sheet-status.connected{color:#7FC79A;}
+  .sheet-status.error{color:#E09A8F;}
+
+  .main{flex:1; min-width:0; padding:24px 28px 60px;}
+  .topbar{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:22px; flex-wrap:wrap;}
+  .topbar h1{font-size:24px; margin:0; font-weight:600; letter-spacing:-0.01em;}
+  .topbar .stamp-date{font-size:12px; color:var(--ink-soft); margin-top:2px;}
+  .topbar-actions{display:flex; gap:8px; flex-wrap:wrap;}
+
+  .btn{
+    display:inline-flex; align-items:center; justify-content:center; gap:6px; padding:10px 14px; border-radius:7px; border:1px solid var(--line);
+    background:var(--paper-card); color:var(--ink); font-family:'Inter',sans-serif; font-size:13.5px; font-weight:600;
+    cursor:pointer; transition:transform .1s, box-shadow .15s; text-decoration:none; white-space:nowrap;
+  }
+  .btn:hover{box-shadow:var(--shadow); transform:translateY(-1px);}
+  .btn.primary{background:linear-gradient(135deg, var(--ink-navy) 0%, var(--ink-navy-2) 100%); border-color:var(--ink-navy); color:#F3EAD2;}
+  .btn.primary:hover{filter:brightness(1.08);}
+  .btn.brass{background:linear-gradient(135deg, var(--brass) 0%, color-mix(in srgb, var(--brass) 80%, #fff) 100%); border-color:var(--brass); color:#fff;}
+  .btn.ghost{background:transparent;}
+  .btn.small{padding:6px 10px; font-size:12px;}
+  .btn:disabled{opacity:.5; cursor:not-allowed;}
+
+  @keyframes panelFadeIn{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);}}
+  .panel{animation:panelFadeIn .25s ease-out;}
+
+  .stat-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(var(--card-min-width, 170px),1fr)); gap:12px; margin-bottom:24px;}
+  .stat-card{
+    background:var(--paper-card); border:1px solid var(--line-soft); border-radius:var(--radius); padding:14px 16px;
+    position:relative; overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,0.03);
+    transition:transform .18s ease, box-shadow .18s ease;
+  }
+  .stat-card:hover{transform:translateY(-2px); box-shadow:0 6px 16px -6px rgba(19,32,57,0.22);}
+  .stat-card::before{content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--brass); transition:width .18s ease;}
+  .stat-card:hover::before{width:4px;}
+  .stat-card.green::before{background:var(--green);}
+  .stat-card.red::before{background:var(--red);}
+  .stat-card .label{font-size:10px; letter-spacing:0.09em; text-transform:uppercase; color:var(--ink-soft); font-weight:700;}
+  .stat-card .value{font-size:20px; font-weight:600; margin-top:4px; letter-spacing:-0.01em;}
+  .stat-card .sub{font-size:11px; color:var(--ink-soft); margin-top:2px;}
+
+  .theme-swatch-row{display:flex; gap:10px; flex-wrap:wrap;}
+  .theme-swatch{
+    width:44px; height:44px; border-radius:50%; border:2px solid rgba(255,255,255,0.5); cursor:pointer;
+    position:relative; transition:transform .15s ease, box-shadow .15s ease; box-shadow:0 1px 3px rgba(0,0,0,0.25);
+  }
+  .theme-swatch:hover{transform:translateY(-2px) scale(1.06); box-shadow:0 4px 10px rgba(0,0,0,0.3);}
+  .theme-swatch.active{border-color:var(--brass, #A8752E); box-shadow:0 0 0 3px rgba(168,117,46,0.35);}
+  .theme-swatch .check{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    color:#fff; font-size:16px; text-shadow:0 1px 2px rgba(0,0,0,0.5); opacity:0;
+  }
+  .theme-swatch.active .check{opacity:1;}
+  .sound-toggle-wrap{margin-top:16px; padding-top:14px; border-top:1px solid rgba(237,231,216,0.14);}
+  .personal-theme-wrap{margin-top:16px; padding-top:14px; border-top:1px solid rgba(237,231,216,0.14);}
+
+  .flag-row{display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;}
+  .flag-pill{display:flex; align-items:center; gap:8px; padding:8px 12px; border-radius:999px; border:1px dashed var(--line); background:var(--paper-card); font-size:12px; font-weight:600; color:var(--ink-soft);}
+  .flag-pill .dot{width:8px; height:8px; border-radius:50%;}
+  .flag-pill.refundable .dot{background:var(--green);} .flag-pill.refundable .n{color:var(--green);}
+  .flag-pill.nrf .dot{background:var(--red);} .flag-pill.nrf .n{color:var(--red);}
+  .flag-pill.holding .dot{background:var(--amber);} .flag-pill.holding .n{color:var(--amber);}
+  .flag-pill.profit .dot{background:var(--green);} .flag-pill.profit .n{color:var(--green);}
+  .flag-pill.loss .dot{background:var(--red);} .flag-pill.loss .n{color:var(--red);}
+  .flag-pill.paystatus .dot{background:var(--brass);} .flag-pill.paystatus .n{color:var(--brass);}
+  .flag-pill .n{font-family:'IBM Plex Mono',monospace; font-weight:600;}
+
+  .panel{background:var(--paper-card); border:1px solid var(--line-soft); border-radius:var(--radius); padding:20px 22px; margin-bottom:20px; box-shadow:0 1px 3px rgba(0,0,0,0.02);}
+  .panel-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; gap:12px; flex-wrap:wrap;}
+  .panel-head h2{font-size:16px; margin:0; font-weight:600;}
+  .panel-head .desc{font-size:12px; color:var(--ink-soft); margin-top:2px;}
+  .section-label{
+    font-family:'Fraunces',serif; font-weight:700; font-size:16px; color:var(--ink-navy);
+    margin:0 0 16px; padding-bottom:8px; border-bottom:1px solid var(--line-soft);
+  }
+  .section-label:not(:first-child){margin-top:24px;}
+
+  .table-wrap{overflow-x:auto; border:1px solid var(--line-soft); border-radius:8px; background:#fff;}
+  table{width:100%; border-collapse:collapse; font-size:13px; min-width:1100px;}
+  thead th{
+    text-align:left; font-size:10.5px; letter-spacing:0.07em; text-transform:uppercase; color:var(--ink-soft);
+    font-weight:700; padding:10px 12px; background:#F0ECE1; border-bottom:1px solid var(--line); white-space:nowrap;
+  }
+  tbody td{padding:10px 12px; border-bottom:1px dashed var(--line-soft); white-space:nowrap;}
+  body.density-compact tbody td{padding:5px 8px; font-size:12px;}
+  body.density-compact thead th{padding:7px 8px;}
+  body.density-compact .stat-card{padding:12px 14px;}
+  tbody tr:hover{background:#FAF6EC;}
+  tbody tr.deadline-today{background:var(--red-soft);}
+  tbody tr.deadline-today:hover{background:#F2CFC7;}
+  @keyframes deadline-blink{0%,100%{background:var(--red-soft);} 50%{background:#ffffff;}}
+  tbody tr.deadline-blink{animation:deadline-blink 1s step-start infinite;}
+  tbody tr.deadline-upcoming{background:var(--amber-soft);}
+  @keyframes deadline-blink-dark{0%,100%{background:#7A1414; color:#fff;} 50%{background:#ffffff; color:#7A1414;}}
+  tbody tr.deadline-blink-dark{animation:deadline-blink-dark 0.7s step-start infinite; font-weight:700;}
+  tbody tr.deadline-blink-dark td{border-bottom-color:#7A1414;}
+  tbody tr:last-child td{border-bottom:none;}
+  .badge{display:inline-block; padding:3px 8px; border-radius:999px; font-size:11px; font-weight:700; letter-spacing:0.02em;}
+  .badge.Refundable{background:var(--green-soft); color:var(--green);}
+  .badge.NRF{background:var(--red-soft); color:var(--red);}
+  .badge.HOLDING{background:var(--amber-soft); color:var(--amber);}
+  .profit-pos{color:var(--green); font-weight:600;}
+  .profit-neg{color:var(--red); font-weight:600;}
+  .row-actions{display:flex; gap:6px;}
+  .icon-btn{border:1px solid var(--line); background:var(--paper-card); border-radius:6px; padding:5px 9px; cursor:pointer; font-size:12px; color:var(--ink-soft);}
+  .icon-btn:hover{background:#F0ECE1; color:var(--ink);}
+
+  .filter-bar{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px;}
+  .filter-bar input[type=text], .filter-bar select, .filter-bar input[type=date]{
+    padding:9px 12px; border:1px solid var(--line); border-radius:7px; background:#fff; font-family:'Inter',sans-serif; font-size:13.5px; color:var(--ink);
+  }
+  .filter-bar input[type=text]{flex:1; min-width:200px;}
+
+  .form-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:16px;}
+  .field{display:flex; flex-direction:column; gap:6px;}
+  .field.span2{grid-column:span 2;}
+  .field.span3{grid-column:span 3;}
+  .field label{font-size:12px; font-weight:600; color:var(--ink-soft); letter-spacing:0.01em;}
+  .field .hint{font-size:11px; color:#8B93A2;}
+  .field input, .field select, .field textarea{
+    padding:10px 12px; border:1px solid var(--line); border-radius:7px; background:#fff; font-family:'Inter',sans-serif; font-size:14px; color:var(--ink);
+  }
+  .field input.num-input{font-family:'IBM Plex Mono',monospace;}
+  .field input.num-input[readonly]{
+    background:#F2EEE2; color:var(--brass); font-weight:600; cursor:default;
+  }
+  .hint#advanceCurrencyReadout{
+    font-family:'IBM Plex Mono',monospace; color:var(--brass); font-weight:600; font-size:12px;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus{outline:2px solid var(--brass); outline-offset:1px; border-color:var(--brass);}
+  .field textarea{resize:vertical; min-height:64px; font-family:'Inter',sans-serif;}
+  .form-actions{display:flex; gap:10px; margin-top:20px; align-items:center; flex-wrap:wrap;}
+  .warn-box{
+    background:var(--red-soft); border:1px solid #E3B6AE; color:var(--red); padding:10px 14px; border-radius:7px;
+    font-size:13px; margin-bottom:16px; display:none; align-items:center; gap:8px;
+  }
+  .warn-box.show{display:flex;}
+  .ok-box{
+    background:var(--green-soft); border:1px solid #B9DCC4; color:var(--green); padding:10px 14px; border-radius:7px;
+    font-size:13px; margin-bottom:16px; display:none; align-items:center; gap:8px; font-weight:600;
+  }
+  .ok-box.show{display:flex;}
+  .rm-approval-box{
+    background:var(--amber-soft); border:1px solid #E0C58A; border-radius:8px; padding:14px 16px; margin:16px 0;
+  }
+  .rm-approval-title{font-size:13px; font-weight:700; color:#8A6416;}
+  .orig-ref{
+    background:#F0ECE1; border:1px dashed var(--line); border-radius:8px; padding:9px 14px;
+    font-size:12.5px; color:var(--ink-soft); margin-bottom:16px;
+  }
+  .orig-ref strong{color:var(--ink); font-family:'IBM Plex Mono',monospace; font-weight:600;}
+
+  .approval-add-row{display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:12px;}
+  .approval-add-row input{
+    padding:9px 12px; border:1px solid var(--line); border-radius:7px; background:#fff;
+    font-family:'Inter',sans-serif; font-size:13.5px; color:var(--ink);
+  }
+  .approval-add-row input#ap_amount{width:160px; font-family:'IBM Plex Mono',monospace;}
+  .approval-add-row input#ap_remark{flex:1; min-width:180px;}
+
+  #approvalsTable{min-width:100%;}
+  #approvalsTable tfoot td{
+    padding:10px 12px; border-top:1px solid var(--line); background:#F7F4EC;
+    font-family:'IBM Plex Mono',monospace; font-size:13px;
+  }
+
+  .calc-preview{
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px;
+    background:#F0ECE1; border:1px dashed var(--line); border-radius:8px; padding:14px 16px; margin-top:12px;
+  }
+  .calc-preview div .l{font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--ink-soft); font-weight:700;}
+  .calc-preview div .v{font-family:'IBM Plex Mono',monospace; font-size:15px; font-weight:600; margin-top:3px;}
+
+  .edit-log-list{display:flex; flex-direction:column; gap:0;}
+  .log-line{
+    padding:9px 4px; border-bottom:1px dashed var(--line-soft); font-size:13px; line-height:1.5;
+  }
+  .log-line:last-child{border-bottom:none;}
+  .log-line .log-ts{
+    font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:var(--brass); font-weight:600; margin-right:8px;
+  }
+  .log-line .log-who{color:var(--ink-soft); font-weight:600;}
+  .log-line .log-changes{color:var(--ink);}
+
+  .empty-state{text-align:center; padding:40px 20px; color:var(--ink-soft);}
+  .empty-state .glyph{font-size:24px; margin-bottom:8px; font-family:'Fraunces',serif; color:var(--brass);}
+
+  .view{display:none;}
+  .view.active{display:block;}
+
+  @media print{
+    .spine, .mobile-bar, .topbar .topbar-actions, .filter-bar, .row-actions, #newQueryBtnTop, #syncBtn, #loginGate{display:none !important;}
+    .main{padding:0;}
+    .panel{border:none; box-shadow:none;}
+    body{background:#fff;}
+  }
+
+  @media (max-width:900px){
+    .mobile-bar{display:flex; padding-top:calc(10px + env(safe-area-inset-top, 0px));}
+    .spine{
+      position:fixed; left:0; top:0; bottom:0; z-index:96;
+      transform:translateX(-100%); transition:transform .25s ease;
+      padding-top:env(safe-area-inset-top, 0px); padding-bottom:env(safe-area-inset-bottom, 0px);
+    }
+    .spine.open{transform:translateX(0);}
+    .form-grid{grid-template-columns:1fr;}
+    .field.span2, .field.span3{grid-column:span 1;}
+    .main{padding:16px 14px calc(60px + env(safe-area-inset-bottom, 0px));}
+    .topbar h1{font-size:20px;}
+    .stat-grid{grid-template-columns:repeat(2,1fr);}
+    .approval-add-row input#ap_amount{width:100%;}
+    /* Bigger touch targets — 10px/6px padding is comfortable for a mouse
+       cursor but cramped for a finger. */
+    .icon-btn{padding:8px 12px; font-size:13px;}
+    .row-actions{gap:8px;}
+    .spine-tab{padding:12px 16px;}
+    .btn{padding:11px 16px;}
+    .btn.small{padding:9px 13px;}
+    select, input[type="text"], input[type="number"], input[type="date"], input[type="password"], textarea{
+      font-size:16px; /* iOS Safari auto-zooms into inputs smaller than 16px */
+    }
+  }
+  #loginGate{padding-top:calc(20px + env(safe-area-inset-top, 0px)); padding-bottom:calc(20px + env(safe-area-inset-bottom, 0px));}
+
+  @media (max-width:480px){
+    .stat-grid{grid-template-columns:1fr 1fr;}
+    .theme-swatch{width:38px; height:38px;}
+    .login-card{padding:26px 20px 22px;}
+    .table-wrap table{font-size:12px;}
+    .topbar{gap:8px;}
+    .topbar h1{font-size:18px;}
+  }
+  :focus-visible{outline:2px solid var(--brass); outline-offset:2px;}
+</style>
+</head>
+<body>
+
+<div class="mobile-bar">
+  <div class="brand">Query Ledger</div>
+  <button id="mobileMenuBtn" aria-label="Open Navigation">&#9776;</button>
+</div>
+
+<div class="spine-overlay" id="spineOverlay"></div>
+
+<div class="save-lock" id="saveLock" hidden>
+  <div class="save-lock-box"><span class="save-spinner"></span><span>Saving your entry… please wait</span></div>
+</div>
+
+<div id="loginGate">
+  <form class="login-card" id="loginForm">
+    <div class="mark">Query Ledger</div>
+    <div class="sub">Sign in to access the shared ledger.</div>
+    <div class="login-error" id="loginError"></div>
+    <div class="field">
+      <label>Username</label>
+      <input type="text" id="login_username" required autocomplete="username">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="login_password" required autocomplete="current-password">
+    </div>
+    <button type="submit" class="btn primary" id="loginSubmitBtn" style="width:100%; justify-content:center; margin-top:6px;">Log In</button>
+    <div style="text-align:center; margin-top:14px; font-size:12.5px; color:var(--ink-soft);">
+      New here? <a href="#" id="showSignupLink" style="color:var(--brass); font-weight:600;">Create an account</a>
+    </div>
+  </form>
+
+  <form class="login-card" id="signupForm" style="display:none;">
+    <div class="mark">Create Account</div>
+    <div class="sub">Your User Name becomes your Handled By identity — you'll only ever see and edit entries Handled By this name.</div>
+    <div class="login-error" id="signupError"></div>
+    <div class="field">
+      <label>User Name *</label>
+      <input type="text" id="signup_username" required autocomplete="username" placeholder="e.g. VARUN">
+    </div>
+    <div class="field" style="position:relative;">
+      <label>Password *</label>
+      <input type="password" id="signup_password" required autocomplete="new-password" style="padding-right:40px;">
+      <button type="button" class="pw-toggle" data-target="signup_password" aria-label="Show password">&#128065;&#65039;</button>
+    </div>
+    <button type="submit" class="btn primary" id="signupSubmitBtn" style="width:100%; justify-content:center; margin-top:6px;">Create Account</button>
+    <div style="text-align:center; margin-top:14px; font-size:12.5px; color:var(--ink-soft);">
+      Already have an account? <a href="#" id="showLoginLink" style="color:var(--brass); font-weight:600;">Log In</a>
+    </div>
+  </form>
+</div>
+
+<div class="shell">
+  <aside class="spine" id="spine">
+    <div class="spine-brand">
+      <div class="mark">Query Ledger</div>
+      <div class="sub">Cost · Sale · Profit Register</div>
+    </div>
+    <nav class="spine-nav">
+      <button class="spine-tab active" data-view="dashboard"><span class="ic">&#9670;</span> Dashboard</button>
+      <button class="spine-tab" data-view="newquery"><span class="ic">&#43;</span> New Query</button>
+      <button class="spine-tab" data-view="search"><span class="ic">&#128269;</span> Search / Edit</button>
+      <button class="spine-tab" data-view="mine"><span class="ic">&#9776;</span> My Entries</button>
+      <button class="spine-tab" data-view="signups" id="signupsTab" style="display:none;"><span class="ic">&#9989;</span> Signup Requests<span class="pending-badge" id="pendingSignupsBadge" style="display:none;"></span></button>
+      <button class="spine-tab" data-view="admin" id="adminTab" style="display:none;"><span class="ic">&#128100;</span> User Access</button>
+      <button class="spine-tab" data-view="appearance" id="appearanceTab" style="display:none;"><span class="ic">&#127912;</span> Appearance</button>
+    </nav>
+    <div class="spine-foot">
+      <div id="handledByPrefWrap">
+        Handled by
+        <input type="text" id="myNameInput" placeholder="Your name">
+      </div>
+      <div class="sound-toggle-wrap">
+        <div class="sheet-connect-label">Alert Sound <span style="text-transform:none; letter-spacing:0;">(just for you)</span></div>
+        <button type="button" class="sheet-btn" id="soundToggleBtn" aria-pressed="false">&#128276; Sound on</button>
+      </div>
+      <div class="personal-theme-wrap" id="personalThemeWrap" style="display:none;">
+        <div class="sheet-connect-label">My Theme <span style="text-transform:none; letter-spacing:0;">(just for you)</span></div>
+        <div class="theme-swatch-row" id="personalThemeSwatches"></div>
+        <button type="button" class="sheet-btn" id="resetPersonalThemeBtn" style="margin-top:8px;">Use Team Theme</button>
+      </div>
+      <div class="sheet-connect">
+        <div class="sheet-connect-label">Google Sheet database</div>
+        <input type="text" id="sheetUrlInput" placeholder="Apps Script Web App URL">
+        <button type="button" class="sheet-btn" id="sheetConnectBtn">Connect Sheet</button>
+        <div class="sheet-status" id="sheetStatus">Not connected — using local storage</div>
+        <div class="sheet-status" id="sessionStatus" style="display:none;"></div>
+        <div id="changePasswordWrap" style="display:none; margin-top:8px;">
+          <button type="button" class="sheet-btn" id="togglePasswordFormBtn">Change My Password</button>
+          <form id="changeOwnPasswordForm" style="display:none; margin-top:8px;">
+            <input type="password" id="cp_current" placeholder="Current password" required autocomplete="current-password" style="width:100%; margin-bottom:6px; box-sizing:border-box;">
+            <input type="password" id="cp_new" placeholder="New password" required autocomplete="new-password" style="width:100%; margin-bottom:6px; box-sizing:border-box;">
+            <button type="submit" class="sheet-btn">Set Password</button>
+            <div id="changePasswordMsg" style="font-size:11px; margin-top:6px;"></div>
+          </form>
+        </div>
+        <button type="button" class="sheet-btn" id="logoutBtn" style="display:none; margin-top:8px; background:rgba(179,56,44,0.3);">Log Out</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+
+    <!-- DASHBOARD VIEW -->
+    <section class="view active" id="view-dashboard">
+      <div class="topbar">
+        <div>
+          <h1>Dashboard</h1>
+          <div class="stamp-date" id="todayStamp"></div>
+        </div>
+        <div class="topbar-actions">
+          <button class="btn ghost small" id="syncBtn">&#8635; Sync</button>
+          <button class="btn ghost small" id="printBtn">&#128438; Print</button>
+          <button class="btn ghost small" id="exportBtn">&#8659; Excel</button>
+          <button class="btn primary small" id="newQueryBtnTop">&#43; New Query</button>
+        </div>
+      </div>
+
+      <div class="flag-row" id="flagRow"></div>
+      <div class="flag-row" id="profitLossRow"></div>
+      <div class="flag-row" id="paymentStatusRow"></div>
+      <div class="stat-grid" id="statGrid"></div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Totals by Currency</h2>
+            <div class="desc">Currency totals breaking out cost, sale, and profit.</div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="currencyTotalsTable" style="min-width:0;">
+            <thead>
+              <tr><th>Currency</th><th>Bookings</th><th>Total Cost</th><th>Total Sale</th><th>Total Profit</th></tr>
+            </thead>
+            <tbody id="currencyTotalsBody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="currencyTotalsEmpty" style="display:none; padding:16px;">
+          <span style="font-size:12.5px;">No queries yet.</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Complete History</h2>
+            <div class="desc">Every saved query record in the system.</div>
+          </div>
+        </div>
+        <div class="filter-bar">
+          <input type="text" id="dashSearch" placeholder="Search across all fields…">
+          <select id="dashStatusFilter">
+            <option value="">All statuses</option>
+            <option value="Refundable">Refundable</option>
+            <option value="NRF">NRF</option>
+            <option value="HOLDING">HOLDING</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table id="dashTable">
+            <thead>
+              <tr>
+                <th>Query Code</th><th>Booking Status</th><th>Entry Saved At</th><th>Approval Date</th><th>Handled By</th>
+                <th>Agency</th><th>Destination</th><th>Vendor</th><th>Service Type</th>
+                <th>Invoice #</th><th>Invoice Date</th><th>Check In</th><th>Check Out</th><th>Currency</th>
+                <th>Cost</th><th>Sale</th><th>Profit</th><th>Rate</th><th>Cost INR</th><th>Sale INR</th><th>Profit INR</th><th>Profit %</th>
+                <th>Payment Deadline</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="dashTableBody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="dashEmpty" style="display:none;">
+          <div class="glyph">§</div>
+          No queries yet — start with <strong>New Query</strong>.
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Deadline Bookings Data</h2>
+            <div class="desc">Bookings due today, tomorrow, in 2 days — or already overdue. Overdue entries flash dark red until Account Approval is given.</div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="deadlineTable">
+            <thead>
+              <tr>
+                <th>Query Code</th><th>Booking Status</th><th>Handled By</th><th>Agency</th><th>Destination</th>
+                <th>Payment Deadline</th><th>Deadline Date after RM Approval</th><th>Status</th><th>Cost</th><th>Sale</th><th>Accounts Remark</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="deadlineTableBody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="deadlineEmpty" style="display:none; padding:20px;">
+          <span style="font-size:12.5px;">No bookings due tomorrow or overdue.</span>
+        </div>
+      </div>
+
+      <div class="panel" id="deletedEntriesPanel" style="display:none;">
+        <div class="panel-head">
+          <div>
+            <h2>Deleted Entries</h2>
+            <div class="desc">Admin view of deleted entries. Restoring brings records back into active history.</div>
+          </div>
+          <button class="btn ghost small" id="refreshDeletedBtn">&#8635; Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table id="deletedTable">
+            <thead>
+              <tr>
+                <th>Query Code</th><th>Agency</th><th>Destination</th><th>Cost</th><th>Sale</th>
+                <th>Deleted At</th><th>Deleted By</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="deletedTableBody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="deletedEmpty" style="display:none;">
+          <div class="glyph">§</div> No deleted entries.
+        </div>
+      </div>
+    </section>
+
+    <!-- NEW QUERY / EDIT VIEW -->
+    <section class="view" id="view-newquery">
+      <div class="topbar">
+        <div>
+          <h1 id="formTitle">New Query</h1>
+          <div class="stamp-date" id="formSub">Add a query to the shared ledger.</div>
+        </div>
+        <div>
+          <button type="button" class="btn ghost small" id="sampleFillBtn" style="display:none;" title="Fills every field with sample data for a Refundable booking — testing only">&#9889; Sample Fill</button>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="warn-box" id="dupWarning">&#9888; A query with this code already exists. Please edit the existing entry or update the code.</div>
+        <div class="ok-box" id="dupOk" style="display:none;"></div>
+        <form id="queryForm">
+
+          <div class="section-label">Basic Details</div>
+          <div class="form-grid">
+            <div class="field">
+              <label>Date Of Approval *</label>
+              <input type="date" id="f_approvaldate" required>
+            </div>
+            <div class="field">
+              <label>Handled By *</label>
+              <input type="text" id="f_handledby" required placeholder="Name">
+            </div>
+            <div class="field">
+              <label>Query Code *</label>
+              <input type="text" id="f_code" required placeholder="e.g. paka3247293">
+            </div>
+            <div class="field">
+              <label>Invoice Date *</label>
+              <input type="date" id="f_invoicedate" required>
+            </div>
+            <div class="field">
+              <label>Invoice Number *</label>
+              <input type="text" id="f_invoicenumber" required placeholder="e.g. inv0003453">
+            </div>
+            <div class="field">
+              <label>Agency Name *</label>
+              <input type="text" id="f_agency" required placeholder="Agency name">
+            </div>
+            <div class="field">
+              <label>Destination *</label>
+              <input type="text" id="f_destination" required placeholder="e.g. DXB">
+            </div>
+            <div class="field">
+              <label>Vendor Name *</label>
+              <input type="text" id="f_vendor" required placeholder="Vendor name">
+            </div>
+            <div class="field">
+              <label>Check In Date *</label>
+              <input type="date" id="f_checkin" required>
+            </div>
+            <div class="field">
+              <label>Check Out Date *</label>
+              <input type="date" id="f_checkout" required>
+            </div>
+            <div class="field">
+              <label>Service Type *</label>
+              <select id="f_servicetype" required>
+                <option value="HOTEL">HOTEL</option>
+                <option value="FLIGHT">FLIGHT</option>
+                <option value="VISA">VISA</option>
+                <option value="TRANSFER">TRANSFER</option>
+                <option value="TOUR">TOUR</option>
+                <option value="INSURANCE">INSURANCE</option>
+                <option value="EXCURSION">EXCURSION</option>
+                <option value="CRUISE">CRUISE</option>
+                <option value="PACKAGE">PACKAGE</option>
+                <option value="OTHER">OTHER</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Currency *</label>
+              <input type="text" id="f_currency" required maxlength="3" pattern="[A-Za-z]{3}"
+                     placeholder="e.g. USD" list="currencySuggestions" autocomplete="off"
+                     style="text-transform:uppercase;">
+              <datalist id="currencySuggestions">
+                <option value="USD"><option value="AED"><option value="SGD">
+                <option value="JPY"><option value="THB"><option value="INR">
+                <option value="GBP"><option value="EUR"><option value="AUD">
+                <option value="CAD"><option value="SAR"><option value="QAR">
+              </datalist>
+              <div class="hint">3-letter code — type your own if it's not in the list.</div>
+            </div>
+            <div class="field">
+              <label>Infozeal Cost Center *</label>
+              <input type="text" id="f_costcenter" required placeholder="e.g. RAJ" list="costCenterSuggestions" autocomplete="off">
+              <datalist id="costCenterSuggestions">
+                <option value="RAJ"><option value="BLR"><option value="AMD"><option value="GGN">
+                <option value="MUM"><option value="MAA"><option value="COK">
+              </datalist>
+            </div>
+          </div>
+
+          <div class="section-label">Financials &amp; Status</div>
+
+          <div class="orig-ref" id="origRef" style="display:none;">
+            Originally entered: Cost <strong id="origCostVal"></strong> · Sale <strong id="origSaleVal"></strong> <span id="origDateVal"></span>
+          </div>
+
+          <div class="form-grid">
+            <div class="field">
+              <label>Booking Status *</label>
+              <select id="f_status" required>
+                <option value="" disabled selected>-- Select --</option>
+                <option value="Refundable">Refundable</option>
+                <option value="NRF">NRF</option>
+                <option value="HOLDING">HOLDING</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Payment Status *</label>
+              <select id="f_payment_status" required>
+                <option value="" disabled selected>-- Select --</option>
+                <option value="IndCash">IndCash</option>
+                <option value="Dubai OA">Dubai OA</option>
+                <option value="BranchOA">BranchOA</option>
+                <option value="Vendor OA">Vendor OA</option>
+                <option value="Bank">Bank</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Doc PP/PAN/Aadhaar Status *</label>
+              <select id="f_doc_status" required>
+                <option value="" disabled selected>-- Select --</option>
+                <option value="Yes">Yes</option>
+                <option value="No">No</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Cost (<span id="costCurrencyLabel">USD</span>) *</label>
+              <input class="num-input" type="number" step="0.01" id="f_cost" required placeholder="0.00">
+            </div>
+            <div class="field">
+              <label>Sale (<span id="saleCurrencyLabel">USD</span>) *</label>
+              <input class="num-input" type="number" step="0.01" id="f_sale" required placeholder="0.00">
+            </div>
+            <div class="field">
+              <label>Exchange Rate → INR *</label>
+              <div style="display:flex; gap:6px; align-items:center;">
+                <input class="num-input" type="number" step="0.0001" id="f_rate" required placeholder="e.g. 87.25" style="flex:1;">
+                <button type="button" class="btn small ghost" id="suggestRateBtn" title="Fetch live rate from Google Finance">&#8635; Suggest</button>
+              </div>
+              <div class="hint" id="rateHint">1 unit of selected currency in INR.</div>
+            </div>
+            <div class="field">
+              <label>Cost (INR)</label>
+              <input class="num-input" type="text" id="f_costinr_display" readonly placeholder="0.00">
+            </div>
+            <div class="field">
+              <label>Sale (INR)</label>
+              <input class="num-input" type="text" id="f_saleinr_display" readonly placeholder="0.00">
+            </div>
+            <div class="field">
+              <label>Advance Received (INR)</label>
+              <input class="num-input" type="number" step="0.01" id="f_advance_inr" placeholder="0.00">
+              <div class="hint" id="advanceCurrencyReadout">Advance in <span id="advanceCurrencyLabel">USD/AED</span>: <span class="num">0.00</span></div>
+            </div>
+            <div class="field">
+              <label>Payment Deadline Date</label>
+              <input type="date" id="f_payment_deadline" disabled>
+              <div class="hint" id="paymentDeadlineHint">Only applicable to Refundable bookings.</div>
+            </div>
+            <div class="field">
+              <label>Remaining Payment Due</label>
+              <input class="num-input" type="text" id="f_remaining_due_display" readonly placeholder="₹0.00">
+              <div class="hint">Sale (INR) − Advance Received (INR)</div>
+            </div>
+            <div class="field span3">
+              <label>Notes</label>
+              <textarea id="f_notes" placeholder="Optional notes…"></textarea>
+            </div>
+          </div>
+
+          <div class="section-label">Approval History</div>
+          <div class="approval-add-row">
+            <input type="number" step="0.01" id="ap_amount" placeholder="Approved amount">
+            <input type="text" id="ap_remark" placeholder="Service remark (optional)">
+            <button type="button" class="btn small brass" id="addApprovalBtn">&#43; Add Approval</button>
+          </div>
+          <div class="table-wrap">
+            <table id="approvalsTable">
+              <thead>
+                <tr><th>Date</th><th>Time</th><th>Approved Amount</th><th>Remark</th><th></th></tr>
+              </thead>
+              <tbody id="approvalsTableBody"></tbody>
+              <tfoot>
+                <tr>
+                  <td colspan="2" style="font-weight:700;">Total Approved</td>
+                  <td class="num" id="approvalsTotal">0.00</td>
+                  <td colspan="2" id="approvalsRemaining"></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <div class="empty-state" id="approvalsEmpty" style="padding:16px; display:none;">
+            <span style="font-size:12.5px;">No approvals recorded yet.</span>
+          </div>
+
+          <div class="rm-approval-box" id="rmApprovalBox" style="display:none;">
+            <div class="rm-approval-title" id="rmApprovalTitle">&#9888; Approvals exceed Advance Received — RM Approval required</div>
+            <div class="form-grid" style="margin-top:10px;">
+              <div class="field">
+                <label>RM Approval *</label>
+                <select id="f_rm_approval">
+                  <option value="" disabled selected>-- Select --</option>
+                  <option value="Yes">Yes</option>
+                  <option value="No">No</option>
+                </select>
+              </div>
+              <div class="field" id="rmNameWrap" style="display:none;">
+                <label>RM Name *</label>
+                <input type="text" id="f_rm_name" placeholder="Enter RM name">
+              </div>
+              <div class="field" id="rmDeadlineWrap" style="display:none;">
+                <label>Deadline Date after RM Approval *</label>
+                <input type="date" id="f_rm_deadline">
+              </div>
+            </div>
+          </div>
+
+          <div class="section-label">Edit Log</div>
+          <div class="edit-log-list" id="editLogList"></div>
+          <div class="empty-state" id="editLogEmpty" style="padding:16px; display:none;">
+            <span style="font-size:12.5px;">No edits logged yet — this record hasn't been saved.</span>
+          </div>
+
+          <div class="calc-preview" id="calcPreview">
+            <div><div class="l">Profit USD/AED</div><div class="v num" id="cp_profit">0.00</div></div>
+            <div><div class="l">Cost INR</div><div class="v num" id="cp_costinr">0.00</div></div>
+            <div><div class="l">Sale INR</div><div class="v num" id="cp_saleinr">0.00</div></div>
+            <div><div class="l">Profit INR</div><div class="v num" id="cp_profitinr">0.00</div></div>
+            <div><div class="l">INR Profit %</div><div class="v num" id="cp_profitpct">0.00%</div></div>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn primary" id="saveBtn">&#10003; Save Query</button>
+            <button type="button" class="btn ghost" id="cancelEditBtn" style="display:none;">Cancel edit</button>
+            <span id="saveMsg" style="font-size:13px; color:var(--green); font-weight:600;"></span>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- SEARCH / EDIT VIEW -->
+    <section class="view" id="view-search">
+      <div class="topbar">
+        <div>
+          <h1>Search / Edit</h1>
+          <div class="stamp-date">Search queries and edit or delete entries.</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="filter-bar">
+          <input type="text" id="searchInput" placeholder="Search code, dates, agency, destination, vendor…">
+          <select id="searchStatusFilter">
+            <option value="">All statuses</option>
+            <option value="Refundable">Refundable</option>
+            <option value="NRF">NRF</option>
+            <option value="HOLDING">HOLDING</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table id="searchTable">
+            <thead>
+              <tr>
+                <th>Query Code</th><th>Booking Status</th><th>Agency</th><th>Destination</th><th>Vendor</th>
+                <th>Service Type</th><th>Invoice #</th><th>Cost</th><th>Sale</th><th>Profit INR</th><th>Profit %</th><th>Handled By</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="searchTableBody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="searchEmpty" style="display:none;">
+          <div class="glyph">§</div> No matching queries.
+        </div>
+      </div>
+    </section>
+
+    <!-- MY ENTRIES VIEW -->
+    <section class="view" id="view-mine">
+      <div class="topbar">
+        <div>
+          <h1>My Entries</h1>
+          <div class="stamp-date" id="mineSub">Queries handled under your set name.</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="table-wrap">
+          <table id="mineTable">
+            <thead>
+              <tr>
+                <th>Query Code</th><th>Booking Status</th><th>Agency</th><th>Destination</th><th>Vendor</th>
+                <th>Service Type</th><th>Cost</th><th>Sale</th><th>Profit INR</th><th>Profit %</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="mineTableBody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="mineEmpty" style="display:none;">
+          <div class="glyph">§</div> <span id="mineEmptyMsg">Set your name in the sidebar to view your entries.</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- SIGNUP REQUESTS (ADMIN + MODERATOR) -->
+    <section class="view" id="view-signups">
+      <div class="topbar">
+        <div>
+          <h1>Signup Requests</h1>
+          <div class="stamp-date">New accounts stay pending until approved here. A request for a name that already exists resets that account's password on approval instead of creating a duplicate.</div>
+        </div>
+        <button class="btn ghost small" id="refreshSignupsBtn">&#8635; Refresh</button>
+      </div>
+      <div class="panel">
+        <div class="table-wrap">
+          <table id="signupsTable">
+            <thead>
+              <tr><th>User Name</th><th>Requested At</th><th>Note</th><th></th></tr>
+            </thead>
+            <tbody id="signupsTableBody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="signupsEmpty" style="display:none;">
+          <div class="glyph">§</div> No pending signup requests.
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Already Onboarded <span id="onboardedCount" style="color:var(--ink-soft); font-weight:500;"></span></h2>
+            <div class="desc">Everyone with an active login, for reference — managing roles and passwords stays in User Access (admin only).</div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="onboardedTable">
+            <thead>
+              <tr><th>Username</th><th>Display Name</th><th>Role</th></tr>
+            </thead>
+            <tbody id="onboardedTableBody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="onboardedEmpty" style="display:none;">
+          <div class="glyph">§</div> No users yet.
+        </div>
+      </div>
+    </section>
+
+    <!-- USER ACCESS VIEW (ADMIN) -->
+    <section class="view" id="view-admin">
+      <div class="topbar">
+        <div>
+          <h1>User Access</h1>
+          <div class="stamp-date">Manage logins and user roles.</div>
+        </div>
+        <div>
+          <button class="btn ghost small" id="refreshUsersBtn">&#8635; Refresh</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Add User</h2>
+            <div class="desc">Create a user credential for team access.</div>
+          </div>
+        </div>
+        <form id="addUserForm" class="form-grid" style="align-items:end;">
+          <div class="field">
+            <label>Username *</label>
+            <input type="text" id="nu_username" required autocomplete="off">
+          </div>
+          <div class="field">
+            <label>Password *</label>
+            <input type="password" id="nu_password" required autocomplete="new-password">
+          </div>
+          <div class="field">
+            <label>Display Name</label>
+            <input type="text" id="nu_displayname" autocomplete="off">
+          </div>
+          <div class="field">
+            <label>Role *</label>
+            <select id="nu_role" required>
+              <option value="restricted">Restricted (no delete, own entries only)</option>
+              <option value="moderator">Moderator (full access, no admin panels)</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <div class="field">
+            <button type="submit" class="btn primary" id="addUserBtn" style="width:100%; justify-content:center;">&#43; Create User</button>
+          </div>
+        </form>
+        <div id="addUserMsg" style="font-size:12.5px; margin-top:10px;"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Existing Users</h2>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="usersTable">
+            <thead>
+              <tr><th>Username</th><th>Display Name</th><th>Role</th><th>Password</th><th></th></tr>
+            </thead>
+            <tbody id="usersTableBody"></tbody>
+          </table>
+        </div>
+        <div class="empty-state" id="usersEmpty" style="display:none;">
+          <div class="glyph">§</div> <span id="usersEmptyMsg">No users found.</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- APPEARANCE (admin only) -->
+    <section class="view" id="view-appearance">
+      <div class="topbar">
+        <div>
+          <h1>Appearance</h1>
+          <div class="stamp-date">Changes apply for everyone using the app — not just you.</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Theme Presets</h2>
+            <div class="desc">Pick a starting point, then fine-tune the colors below if you like.</div>
+          </div>
+        </div>
+        <div class="theme-swatch-row" id="adminThemeSwatches"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Theme Colors</h2>
+            <div class="desc">Preview updates instantly. Click Save to apply it for the whole team.</div>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>Sidebar Color</label>
+            <input type="color" id="ap_inkNavy" value="#132039">
+          </div>
+          <div class="field">
+            <label>Accent Color</label>
+            <input type="color" id="ap_brass" value="#A8752E">
+          </div>
+          <div class="field">
+            <label>Background Color</label>
+            <input type="color" id="ap_paper" value="#F5F3EC">
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>Layout</h2>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="field">
+            <label>Table Density</label>
+            <select id="ap_density">
+              <option value="comfortable">Comfortable</option>
+              <option value="compact">Compact</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Stat Card Size</label>
+            <select id="ap_cardSize">
+              <option value="small">Small</option>
+              <option value="medium">Medium</option>
+              <option value="large">Large</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions" style="padding: 0 4px;">
+        <button type="button" class="btn primary" id="saveAppearanceBtn">&#10003; Save for Everyone</button>
+        <button type="button" class="btn ghost" id="resetAppearanceBtn">Reset to Default</button>
+        <span id="appearanceMsg" style="font-size:12.5px; color:var(--green); font-weight:600;"></span>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  const STORAGE_KEY = "queries";
+  const SETTINGS_KEY = "settings";
+  const SESSION_KEY = "session";
+
+  const DEFAULT_SHEET_URL = "https://script.google.com/macros/s/AKfycbxmiXL1zd11K8qz45oxf7WB0oWvTuU_tUcc_S1idgCOCzYGxnINQRYtj-nY-DJXpa8nog/exec";
+
+  // Safe Universal Storage Helper
+  const sysStorage = {
+    async get(key) {
+      try {
+        if (window.storage && typeof window.storage.get === 'function') {
+          return await window.storage.get(key, false);
+        }
+        const val = localStorage.getItem(key);
+        return val ? { value: val } : null;
+      } catch (e) {
+        const val = localStorage.getItem(key);
+        return val ? { value: val } : null;
+      }
+    },
+    async set(key, value) {
+      try {
+        if (window.storage && typeof window.storage.set === 'function') {
+          return await window.storage.set(key, value, false);
+        }
+        localStorage.setItem(key, value);
+      } catch (e) {
+        localStorage.setItem(key, value);
+      }
+    }
+  };
+
+  let queries = [];
+  let settings = { myName: "", sheetUrl: "" };
+  let session = { token: "", username: "", displayName: "", role: "" };
+
+  // Three roles: "admin" (full access, incl. user management & appearance),
+  // "moderator" (same content access as admin — sees/edits everyone's
+  // entries, can delete, can give Account Approval — but no admin panels),
+  // and "restricted" (scoped to their own Handled By entries, can't delete).
+  // Anything unrecognized defaults to the safest option, restricted.
+  function normalizeRole(role){
+    return (role === "admin" || role === "moderator") ? role : "restricted";
+  }
+  let editingId = null;
+  let pendingApprovals = [];
+  let pendingEditLog = [];
+  let deletedEntries = [];
+
+  const FIELD_LABELS = {
+    approvalDate:"Date Of Approval", handledBy:"Handled By", code:"Query Code",
+    invoiceDate:"Invoice Date", invoiceNumber:"Invoice Number", agency:"Agency Name",
+    destination:"Destination", vendor:"Vendor Name", checkIn:"Check In Date", checkOut:"Check Out Date",
+    serviceType:"Service Type", currency:"Currency", costCenter:"Infozeal Cost Center", status:"Booking Status",
+    paymentStatus:"Payment Status",
+    docStatus:"Doc PP/PAN/Aadhaar Status",
+    cost:"Cost", sale:"Sale", rate:"Exchange Rate", advanceInr:"Advance Received (INR)",
+    paymentDeadline:"Payment Deadline Date", approvedAmount:"Supplier Payment Approval till date", notes:"Notes",
+    rmApproval:"RM Approval", rmName:"RM Name", rmDeadline:"Deadline Date after RM Approval",
+    accountsRemark:"Accounts Remark"
+  };
+
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+  const fmt = (n) => (isFinite(n) ? n : 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+  const fmtPct = (n) => (isFinite(n) ? n : 0).toFixed(2) + "%";
+  const uid = () => "q_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2,8);
+
+  // Display formats. Dates are stored as yyyy-mm-dd (what date inputs use);
+  // everything shown in tables is DD-MM-YYYY.
+  const MONTHS = { jan:"01", feb:"02", mar:"03", apr:"04", may:"05", jun:"06", jul:"07", aug:"08", sep:"09", oct:"10", nov:"11", dec:"12" };
+  function fmtDate(val){
+    const m = String(cleanDateStr(val) || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? m[3] + "-" + m[2] + "-" + m[1] : String(cleanDateStr(val) || "");
+  }
+  // Timestamps such as "27 Sep 2026 06:00 PM" or "Sep 27, 2026 06:00 PM" -> "27-09-2026 06:00 PM".
+  function fmtStamp(val){
+    const str = String(val || "").trim();
+    let m = str.match(/^(\d{1,2})\s+([A-Za-z]{3})[A-Za-z]*\.?,?\s+(\d{4})\s*,?\s*(.*)$/);
+    let day, mon, year, rest;
+    if(m){ day = m[1]; mon = m[2]; year = m[3]; rest = m[4]; }
+    else {
+      m = str.match(/^([A-Za-z]{3})[A-Za-z]*\.?\s+(\d{1,2}),?\s+(\d{4})\s*,?\s*(.*)$/);
+      if(!m) return str;
+      mon = m[1]; day = m[2]; year = m[3]; rest = m[4];
+    }
+    const mm = MONTHS[mon.toLowerCase()];
+    if(!mm) return str;
+    return String(day).padStart(2,"0") + "-" + mm + "-" + year + (rest ? " " + rest : "");
+  }
+
+  const cleanDateStr = (val) => {
+    if(val === undefined || val === null) return "";
+    const m = String(val).match(/^(\d{4}-\d{2}-\d{2})T/);
+    return m ? m[1] : String(val);
+  };
+  const scrubIsoInText = (text) => String(text || "").replace(/(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}:\d{2}(\.\d+)?Z/g, "$1");
+
+  // Returns "yyyy-mm-dd" from a Date's LOCAL calendar date. Deliberately
+  // not using toISOString().slice(0,10) — that converts to UTC first, which
+  // silently shifts the date back a day for any timezone ahead of UTC
+  // (e.g. India, UTC+5:30) once it's past 6:30pm local time or at local
+  // midnight — exactly what caused deadlines to show the wrong "days until"
+  // status.
+  const localDateStr = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  };
+
+  function setSheetStatus(text, cls){
+    const el = $("#sheetStatus");
+    if(!el) return;
+    el.textContent = text;
+    el.className = "sheet-status" + (cls ? " " + cls : "");
+  }
+
+  async function sheetFetch(payload){
+    const url = (settings.sheetUrl || "").trim();
+    if(!url) throw new Error("Not connected to a Google Sheet.");
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(Object.assign({ token: session.token }, payload))
+    });
+    const json = await res.json();
+    if(!json.ok) throw new Error(json.error || "Google Sheet request failed");
+    return json;
+  }
+
+  async function sheetList(){
+    const url = (settings.sheetUrl || "").trim();
+    if(!url) return null;
+    const res = await fetch(url + (url.includes("?") ? "&" : "?") + "action=list&token=" + encodeURIComponent(session.token));
+    const json = await res.json();
+    if(!json.ok) throw new Error(json.error || "Could not load from Google Sheet");
+    return json.data || [];
+  }
+
+  async function sheetLogin(username, password){
+    const url = (settings.sheetUrl || "").trim();
+    if(!url) throw new Error("Connect a Google Sheet first.");
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action: "login", username, password })
+    });
+    const json = await res.json();
+    if(!json.ok) throw new Error(json.error || "Login failed");
+    return json;
+  }
+
+  function showLoginGate(message, tone){
+    $("#loginGate").classList.remove("hidden");
+    if(message){
+      $("#loginError").textContent = message;
+      $("#loginError").classList.add("show");
+      $("#loginError").style.background = tone === "info" ? "var(--amber-soft)" : "var(--red-soft)";
+      $("#loginError").style.color = tone === "info" ? "var(--amber)" : "var(--red)";
+    } else {
+      $("#loginError").classList.remove("show");
+    }
+  }
+
+  function hideLoginGate(){
+    $("#loginGate").classList.add("hidden");
+  }
+
+  function showSignupFormView(){
+    $("#loginForm").style.display = "none";
+    $("#signupForm").style.display = "block";
+    $("#signupError").classList.remove("show");
+  }
+
+  function showLoginFormView(){
+    $("#signupForm").style.display = "none";
+    $("#loginForm").style.display = "block";
+    $("#loginError").classList.remove("show");
+  }
+
+  function togglePasswordVisibility(e){
+    const btn = e.currentTarget;
+    const input = document.getElementById(btn.getAttribute("data-target"));
+    if(!input) return;
+    if(input.type === "password"){
+      input.type = "text";
+      btn.innerHTML = "&#128584;"; // closed/peeking eye — password is visible
+      btn.setAttribute("aria-label", "Hide password");
+    } else {
+      input.type = "password";
+      btn.innerHTML = "&#128065;&#65039;"; // open eye — password is hidden
+      btn.setAttribute("aria-label", "Show password");
+    }
+  }
+
+  async function handleSignupSubmit(e){
+    e.preventDefault();
+    const username = $("#signup_username").value.trim();
+    const password = $("#signup_password").value;
+    if(!username || !password){
+      $("#signupError").textContent = "User Name and Password are required.";
+      $("#signupError").classList.add("show");
+      return;
+    }
+    const url = (settings.sheetUrl || "").trim();
+    if(!url){
+      $("#signupError").textContent = "Not connected to a Google Sheet — accounts can't be created in local-only mode.";
+      $("#signupError").classList.add("show");
+      return;
+    }
+    const btn = $("#signupSubmitBtn");
+    btn.disabled = true;
+    btn.textContent = "Submitting…";
+    try{
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ action: "signup", username, password })
+      });
+      const json = await res.json();
+      if(!json.ok) throw new Error(json.error || "Could not submit account request.");
+
+      $("#signup_username").value = "";
+      $("#signup_password").value = "";
+      showLoginFormView();
+      showLoginGate(json.duplicate
+        ? "Request submitted — that name already has an account, so an admin/moderator will need to confirm it's you before you can log in."
+        : "Request submitted — an admin or moderator needs to approve it before you can log in.", "info");
+    }catch(err){
+      $("#signupError").textContent = err.message;
+      $("#signupError").classList.add("show");
+    }finally{
+      btn.disabled = false;
+      btn.textContent = "Create Account";
+    }
+  }
+
+  function toggleChangePasswordForm(){
+    const form = $("#changeOwnPasswordForm");
+    const showing = form.style.display !== "none";
+    form.style.display = showing ? "none" : "block";
+    if(!showing){
+      $("#cp_current").value = "";
+      $("#cp_new").value = "";
+      $("#changePasswordMsg").textContent = "";
+    }
+  }
+
+  async function handleChangeOwnPasswordSubmit(e){
+    e.preventDefault();
+    const currentPassword = $("#cp_current").value;
+    const newPassword = $("#cp_new").value;
+    if(!newPassword.trim()){
+      $("#changePasswordMsg").style.color = "var(--red, #E09A8F)";
+      $("#changePasswordMsg").textContent = "New password is required.";
+      return;
+    }
+    const btn = e.target.querySelector("button[type=submit]");
+    btn.disabled = true;
+    $("#changePasswordMsg").style.color = "#EDE7D8";
+    $("#changePasswordMsg").textContent = "Saving…";
+    try{
+      await sheetFetch({ action: "changeMyPassword", currentPassword, newPassword });
+      $("#changePasswordMsg").style.color = "#7FC79A";
+      $("#changePasswordMsg").textContent = "Password updated.";
+      $("#cp_current").value = "";
+      $("#cp_new").value = "";
+      setTimeout(() => { if($("#changePasswordMsg")) { $("#changePasswordMsg").textContent = ""; toggleChangePasswordForm(); } }, 1500);
+    }catch(err){
+      $("#changePasswordMsg").style.color = "#E09A8F";
+      $("#changePasswordMsg").textContent = err.message;
+    }finally{
+      btn.disabled = false;
+    }
+  }
+
+  function updateSessionUI(){
+    const signedIn = !!session.token;
+    $("#logoutBtn").style.display = signedIn ? "block" : "none";
+    $("#changePasswordWrap").style.display = signedIn ? "block" : "none";
+    const statusEl = $("#sessionStatus");
+    statusEl.style.display = signedIn ? "block" : "none";
+    statusEl.textContent = signedIn
+      ? ("Signed in as " + (session.displayName || session.username) + (session.role === "restricted" ? " (no delete access)" : session.role === "moderator" ? " (moderator)" : ""))
+      : "";
+    $("#signupsTab").style.display = (signedIn && (session.role === "admin" || session.role === "moderator")) ? "flex" : "none";
+    if(signedIn && (session.role === "admin" || session.role === "moderator")){ loadPendingSignups(); }
+    $("#adminTab").style.display = (signedIn && (session.role === "admin" || session.role === "moderator")) ? "flex" : "none";
+    $("#appearanceTab").style.display = (signedIn && session.role === "admin") ? "flex" : "none";
+    $("#handledByPrefWrap").style.display = (session.role === "admin" || !settings.sheetUrl) ? "block" : "none";
+    $("#personalThemeWrap").style.display = signedIn ? "block" : "none";
+    $("#sampleFillBtn").style.display = (signedIn && session.role === "admin") ? "inline-flex" : "none";
+    const showDeleted = signedIn && (session.role === "admin" || session.role === "moderator");
+    $("#deletedEntriesPanel").style.display = showDeleted ? "block" : "none";
+    if(showDeleted){ loadDeletedEntries(); }
+  }
+
+  function canDelete(){
+    return !settings.sheetUrl || session.role !== "restricted";
+  }
+
+  // A restricted user's identity is now fixed at signup (their User Name
+  // doubles as their Handled By value) — no more prompting for it each
+  // login. Admins, and anyone in fully-local (no Sheet) mode, see everything.
+  function myIdentity(){
+    return (session.displayName || session.username || "").trim().toLowerCase();
+  }
+
+  function visibleQueries(){
+    const identity = myIdentity();
+    if(session.role !== "restricted" || !identity) return queries;
+    return queries.filter(q => (q.handledBy||"").trim().toLowerCase() === identity);
+  }
+
+  function canEditRecord(q){
+    const identity = myIdentity();
+    if(session.role !== "restricted" || !identity) return true;
+    return (q.handledBy||"").trim().toLowerCase() === identity;
+  }
+
+  async function persistSession(){
+    try{ await sysStorage.set(SESSION_KEY, JSON.stringify(session)); }
+    catch(e){ console.error("Storage error", e); }
+  }
+
+  async function establishConnection(){
+    if(!settings.sheetUrl){
+      setSheetStatus("Not connected — using local storage", "");
+      updateSessionUI();
+      hideLoginGate();
+      return true;
+    }
+    if(!session.token){
+      setSheetStatus("Not connected — sign in required", "error");
+      updateSessionUI();
+      showLoginGate();
+      return false;
+    }
+    setSheetStatus("Connecting…", "");
+    try{
+      const remote = await sheetList();
+      queries = remote;
+      await persistQueriesLocalOnly();
+      setSheetStatus("Connected — synced " + queries.length + " record(s).", "connected");
+      updateSessionUI();
+      hideLoginGate();
+      loadAppearance();
+      startApprovalWatch();
+      return true;
+    }catch(err){
+      stopApprovalWatch();
+      session = { token:"", username:"", displayName:"", role:"" };
+      await persistSession();
+      setSheetStatus("Not connected — sign in required", "error");
+      updateSessionUI();
+      showLoginGate(err.message);
+      return false;
+    }
+  }
+
+  async function handleLoginSubmit(e){
+    e.preventDefault();
+    const username = $("#login_username").value.trim();
+    const password = $("#login_password").value;
+    const btn = $("#loginSubmitBtn");
+    btn.disabled = true;
+    btn.textContent = "Signing in…";
+    $("#loginError").classList.remove("show");
+    try{
+      const result = await sheetLogin(username, password);
+      session = { token: result.token, username, displayName: result.displayName || username, role: normalizeRole(result.role) };
+      await persistSession();
+      if(!settings.myName){
+        settings.myName = session.displayName;
+        $("#myNameInput").value = settings.myName;
+        await persistSettings();
+      }
+      $("#login_password").value = "";
+      const ok = await establishConnection();
+      if(ok){
+        renderAll();
+        checkPaymentDeadlines();
+      }
+    }catch(err){
+      showLoginGate(err.message);
+    }finally{
+      btn.disabled = false;
+      btn.textContent = "Log In";
+    }
+  }
+
+  async function logout(){
+    stopApprovalWatch();
+    session = { token:"", username:"", displayName:"", role:"" };
+    await persistSession();
+    queries = [];
+    renderAll();
+    updateSessionUI();
+    setSheetStatus("Not connected — sign in required", "error");
+    showLoginGate();
+  }
+
+  async function connectSheet(){
+    const url = $("#sheetUrlInput").value.trim();
+    session = { token:"", username:"", displayName:"", role:"" };
+    await persistSession();
+    if(!url){
+      settings.sheetUrl = "";
+      await persistSettings();
+      await establishConnection();
+      renderAll();
+      return;
+    }
+    settings.sheetUrl = url;
+    await persistSettings();
+    const ok = await establishConnection();
+    if(ok){
+      renderAll();
+      checkPaymentDeadlines();
+    }
+  }
+
+  async function syncFromSheet(){
+    if(!settings.sheetUrl){ setSheetStatus("Not connected — using local storage", ""); return; }
+    setSheetStatus("Syncing…", "");
+    try{
+      const remote = await sheetList();
+      queries = remote;
+      await persistQueriesLocalOnly();
+      setSheetStatus("Connected — last synced just now.", "connected");
+      renderAll();
+      checkPaymentDeadlines();
+    }catch(err){
+      setSheetStatus("Session issue — sign in required", "error");
+      session = { token:"", username:"", displayName:"", role:"" };
+      await persistSession();
+      updateSessionUI();
+      showLoginGate(err.message);
+    }
+  }
+
+  async function loadDeletedEntries(){
+    if((session.role !== "admin" && session.role !== "moderator") || !settings.sheetUrl) return;
+    try{
+      const result = await sheetFetch({ action: "listDeleted" });
+      deletedEntries = result.data || [];
+      renderDeletedEntries();
+    }catch(err){
+      console.error("Could not load deleted entries", err);
+    }
+  }
+
+  function renderDeletedEntries(){
+    const tbody = $("#deletedTableBody");
+    if(!tbody) return;
+    tbody.innerHTML = deletedEntries.map(q => {
+      const d = derive(q);
+      return `<tr data-id="${q.id}">
+        <td><strong>${esc(q.code)}</strong></td>
+        <td>${esc(q.agency)||"—"}</td>
+        <td>${esc(q.destination)||"—"}</td>
+        <td class="num">${fmt(d.cost)}</td>
+        <td class="num">${fmt(d.sale)}</td>
+        <td>${esc(fmtStamp(q.deletedAt))||"—"}</td>
+        <td>${esc(q.deletedBy)||"—"}</td>
+        <td class="row-actions"><button class="icon-btn" data-restore="${q.id}">Restore</button></td>
+      </tr>`;
+    }).join("");
+    $("#deletedEmpty").style.display = deletedEntries.length ? "none" : "block";
+  }
+
+  async function restoreEntryFlow(id, btn){
+    const entry = deletedEntries.find(q => q.id === id);
+    if(!confirm(`Restore "${entry ? entry.code : id}" back into Complete History?`)) return;
+    if(btn){ btn.disabled = true; btn.textContent = "Restoring…"; }
+    try{
+      await sheetFetch({ action: "restoreEntry", id });
+      await syncFromSheet();
+      await loadDeletedEntries();
+    }catch(err){
+      alert("Could not restore: " + err.message);
+      if(btn){ btn.disabled = false; btn.textContent = "Restore"; }
+    }
+  }
+
+  // ---------- Appearance (admin-controlled shared theme + personal override) ----------
+  const DEFAULT_APPEARANCE = { inkNavy:"#132039", brass:"#A8752E", paper:"#F5F3EC", density:"comfortable", cardSize:"medium" };
+  const CARD_SIZE_WIDTHS = { small:"140px", medium:"170px", large:"210px" };
+
+  const THEME_PRESETS = {
+    ledger:   { label:"Ledger Navy",   inkNavy:"#132039", brass:"#A8752E", paper:"#F5F3EC" },
+    ocean:    { label:"Ocean Blue",    inkNavy:"#0B3D5C", brass:"#1C9CAD", paper:"#EAF4F6" },
+    sunset:   { label:"Sunset Amber",  inkNavy:"#3D1F12", brass:"#E07A2E", paper:"#FBF0E4" },
+    forest:   { label:"Forest Green",  inkNavy:"#173829", brass:"#4F9A5F", paper:"#F0F5EC" },
+    plum:     { label:"Plum Berry",    inkNavy:"#2E1436", brass:"#B85C9E", paper:"#F7EEF5" },
+    slate:    { label:"Slate Steel",   inkNavy:"#1E2A32", brass:"#5B8FA8", paper:"#EFF3F5" }
+  };
+
+  function renderThemeSwatches(containerId, activeKey, onPick){
+    const container = $("#"+containerId);
+    if(!container) return;
+    container.innerHTML = Object.keys(THEME_PRESETS).map(key => {
+      const p = THEME_PRESETS[key];
+      return `<button type="button" class="theme-swatch${key === activeKey ? " active" : ""}" data-theme-key="${key}"
+        title="${esc(p.label)}"
+        style="background:linear-gradient(135deg, ${p.inkNavy} 50%, ${p.brass} 50%);">
+        <span class="check">&#10003;</span>
+      </button>`;
+    }).join("");
+    container.querySelectorAll(".theme-swatch").forEach(btn => {
+      btn.addEventListener("click", () => onPick(btn.getAttribute("data-theme-key")));
+    });
+  }
+
+  function applyAppearance(a){
+    const root = document.documentElement.style;
+    root.setProperty("--ink-navy", a.inkNavy);
+    root.setProperty("--brass", a.brass);
+    root.setProperty("--paper", a.paper);
+    root.setProperty("--card-min-width", CARD_SIZE_WIDTHS[a.cardSize] || CARD_SIZE_WIDTHS.medium);
+    document.body.classList.toggle("density-compact", a.density === "compact");
+  }
+
+  // The admin's shared theme is the baseline; a personal preset (chosen
+  // locally, never saved to the Sheet) layers on top of it for whoever
+  // picked it, without affecting anyone else.
+  let sharedAppearance = DEFAULT_APPEARANCE;
+
+  function applyEffectiveAppearance(){
+    let a = sharedAppearance;
+    if(settings.personalTheme && THEME_PRESETS[settings.personalTheme]){
+      const p = THEME_PRESETS[settings.personalTheme];
+      a = Object.assign({}, sharedAppearance, { inkNavy:p.inkNavy, brass:p.brass, paper:p.paper });
+    }
+    applyAppearance(a);
+    renderThemeSwatches("personalThemeSwatches", settings.personalTheme || "", async (key) => {
+      settings.personalTheme = key;
+      await persistSettings();
+      applyEffectiveAppearance();
+    });
+  }
+
+  function fillAppearanceForm(a){
+    $("#ap_inkNavy").value = a.inkNavy;
+    $("#ap_brass").value = a.brass;
+    $("#ap_paper").value = a.paper;
+    $("#ap_density").value = a.density;
+    $("#ap_cardSize").value = a.cardSize;
+    renderThemeSwatches("adminThemeSwatches", "", (key) => {
+      const p = THEME_PRESETS[key];
+      fillAppearanceForm(Object.assign({}, readAppearanceForm(), { inkNavy:p.inkNavy, brass:p.brass, paper:p.paper }));
+      applyAppearance(readAppearanceForm());
+    });
+  }
+
+  function readAppearanceForm(){
+    return {
+      inkNavy: $("#ap_inkNavy").value,
+      brass: $("#ap_brass").value,
+      paper: $("#ap_paper").value,
+      density: $("#ap_density").value,
+      cardSize: $("#ap_cardSize").value
+    };
+  }
+
+  async function loadAppearance(){
+    if(!settings.sheetUrl){ sharedAppearance = DEFAULT_APPEARANCE; applyEffectiveAppearance(); return; }
+    try{
+      const url = settings.sheetUrl.trim() + (settings.sheetUrl.includes("?") ? "&" : "?") + "action=getAppearance&token=" + encodeURIComponent(session.token);
+      const res = await fetch(url);
+      const json = await res.json();
+      sharedAppearance = (json.ok && json.appearance) ? Object.assign({}, DEFAULT_APPEARANCE, json.appearance) : DEFAULT_APPEARANCE;
+      applyEffectiveAppearance();
+      fillAppearanceForm(sharedAppearance);
+    }catch(err){
+      sharedAppearance = DEFAULT_APPEARANCE;
+      applyEffectiveAppearance();
+    }
+  }
+
+  async function saveAppearance(){
+    const a = readAppearanceForm();
+    sharedAppearance = a;
+    applyEffectiveAppearance(); // instant local preview regardless of save outcome
+    const btn = $("#saveAppearanceBtn");
+    btn.disabled = true;
+    $("#appearanceMsg").style.color = "var(--ink-soft)";
+    $("#appearanceMsg").textContent = "Saving…";
+    try{
+      await sheetFetch({ action: "setAppearance", appearance: a });
+      $("#appearanceMsg").style.color = "var(--green)";
+      $("#appearanceMsg").textContent = "Saved — applied for everyone.";
+      setTimeout(() => { if($("#appearanceMsg")) $("#appearanceMsg").textContent = ""; }, 3000);
+    }catch(err){
+      $("#appearanceMsg").style.color = "var(--red)";
+      $("#appearanceMsg").textContent = "Couldn't save: " + err.message;
+    }finally{
+      btn.disabled = false;
+    }
+  }
+
+  async function loadPendingSignups(){
+    if(session.role !== "admin" && session.role !== "moderator") return;
+    try{
+      const result = await sheetFetch({ action: "listPendingSignups" });
+      const requests = result.requests || [];
+      renderPendingSignups(requests);
+      const badge = $("#pendingSignupsBadge");
+      if(requests.length){
+        badge.textContent = requests.length;
+        badge.style.display = "inline-block";
+      } else {
+        badge.style.display = "none";
+      }
+    }catch(err){
+      console.error("Could not load signup requests", err);
+    }
+  }
+
+  async function loadOnboardedUsers(){
+    if(session.role !== "admin" && session.role !== "moderator") return;
+    try{
+      const result = await sheetFetch({ action: "listUsers" });
+      const users = result.users || [];
+      $("#onboardedCount").textContent = users.length ? `(${users.length})` : "";
+      $("#onboardedTableBody").innerHTML = users.map(u => `
+        <tr>
+          <td><strong>${esc(u.username)}</strong></td>
+          <td>${esc(u.displayName)||"—"}</td>
+          <td>${esc(u.role)}</td>
+        </tr>
+      `).join("");
+      $("#onboardedEmpty").style.display = users.length ? "none" : "block";
+    }catch(err){
+      console.error("Could not load onboarded users", err);
+    }
+  }
+
+  function renderPendingSignups(requests){
+    $("#signupsTableBody").innerHTML = requests.map(r => `
+      <tr>
+        <td><strong>${esc(r.username)}</strong></td>
+        <td>${esc(r.requestedAt)}</td>
+        <td>${r.note ? `<span style="color:var(--red);">${esc(r.note)}</span>` : "—"}</td>
+        <td class="row-actions">
+          <button type="button" class="icon-btn" data-approve-signup="${esc(r.requestId)}">Approve</button>
+          <button type="button" class="icon-btn" data-reject-signup="${esc(r.requestId)}">Reject</button>
+        </td>
+      </tr>
+    `).join("");
+    $("#signupsEmpty").style.display = requests.length ? "none" : "block";
+  }
+
+  async function approveSignupFlow(requestId, btn){
+    if(!confirm("Approve this signup request? If the name already exists, this will reset that account's password to the one they requested.")) return;
+    btn.disabled = true;
+    btn.textContent = "Approving…";
+    try{
+      await sheetFetch({ action: "approveSignup", requestId });
+      await loadPendingSignups();
+      await loadOnboardedUsers();
+    }catch(err){
+      alert("Could not approve: " + err.message);
+      btn.disabled = false;
+      btn.textContent = "Approve";
+    }
+  }
+
+  async function rejectSignupFlow(requestId, btn){
+    if(!confirm("Reject this signup request? The person will not be able to log in.")) return;
+    btn.disabled = true;
+    btn.textContent = "Rejecting…";
+    try{
+      await sheetFetch({ action: "rejectSignup", requestId });
+      await loadPendingSignups();
+    }catch(err){
+      alert("Could not reject: " + err.message);
+      btn.disabled = false;
+      btn.textContent = "Reject";
+    }
+  }
+
+  // Moderators can open User Access but not add users or change roles, and
+  // can't touch admin accounts (the server enforces all of this too).
+  function applyUserAccessMode(){
+    const isAdmin = session.role === "admin";
+    $("#addUserForm").querySelectorAll("input, select, button").forEach(el => { el.disabled = !isAdmin; });
+    $("#addUserMsg").style.color = "var(--ink-soft)";
+    $("#addUserMsg").textContent = isAdmin ? "" : "Only an admin can add users or change roles.";
+  }
+
+  async function loadUsers(){
+    if(session.role !== "admin" && session.role !== "moderator") return;
+    applyUserAccessMode();
+    $("#usersTableBody").innerHTML = "";
+    $("#usersEmpty").style.display = "none";
+    try{
+      const result = await sheetFetch({ action: "listUsers" });
+      renderUsersTable(result.users || []);
+    }catch(err){
+      $("#usersEmpty").style.display = "block";
+      $("#usersEmptyMsg").textContent = "Couldn't load users: " + err.message;
+    }
+  }
+
+  function renderUsersTable(users){
+    const isMod = session.role === "moderator";
+    $("#usersTableBody").innerHTML = users.map(u => {
+      const roleLocked = isMod ? "disabled" : "";                                  // moderators never change roles
+      const rowLocked = (isMod && u.role === "admin") ? "disabled" : "";           // ...or touch admin accounts
+      const lockTip = rowLocked ? ' title="Moderators can\'t change admin accounts"' : "";
+      return `
+      <tr data-username="${esc(u.username)}">
+        <td><strong>${esc(u.username)}</strong>${u.username === session.username ? " (you)" : ""}</td>
+        <td><input type="text" class="num-input" style="font-family:'Inter',sans-serif;" data-name-for="${esc(u.username)}" value="${esc(u.displayName)}" ${rowLocked}${lockTip}></td>
+        <td>
+          <select data-role-for="${esc(u.username)}" ${roleLocked} ${isMod ? 'title="Only an admin can change roles"' : ""}>
+            <option value="admin" ${u.role === "admin" ? "selected" : ""}>Admin</option>
+            <option value="moderator" ${u.role === "moderator" ? "selected" : ""}>Moderator (no admin panels)</option>
+            <option value="restricted" ${u.role === "restricted" ? "selected" : ""}>Restricted (no delete)</option>
+          </select>
+        </td>
+        <td>
+          <div style="display:flex; gap:6px;">
+            <input type="password" placeholder="New password" style="width:110px;" data-newpass-for="${esc(u.username)}" ${rowLocked}>
+            <button type="button" class="icon-btn" data-changepass="${esc(u.username)}" ${rowLocked}>Set</button>
+          </div>
+        </td>
+        <td class="row-actions">
+          <button type="button" class="icon-btn" data-save-profile="${esc(u.username)}" ${rowLocked}>Save</button>
+          <button type="button" class="icon-btn" data-delete-user="${esc(u.username)}" ${rowLocked}>Delete</button>
+        </td>
+      </tr>
+    `;
+    }).join("");
+    $("#usersEmpty").style.display = users.length ? "none" : "block";
+    if(!users.length){ $("#usersEmptyMsg").textContent = "No users found."; }
+  }
+
+  async function handleCreateUser(e){
+    if(session.role !== "admin"){ e.preventDefault(); return; }
+    e.preventDefault();
+    const username = $("#nu_username").value.trim();
+    const password = $("#nu_password").value;
+    const displayName = $("#nu_displayname").value.trim();
+    const role = $("#nu_role").value;
+    const btn = $("#addUserBtn");
+    btn.disabled = true;
+    $("#addUserMsg").style.color = "var(--ink-soft)";
+    $("#addUserMsg").textContent = "Creating…";
+    try{
+      await sheetFetch({ action: "createUser", username, password, displayName, role });
+      $("#addUserMsg").style.color = "var(--green)";
+      $("#addUserMsg").textContent = "User created.";
+      $("#addUserForm").reset();
+      await loadUsers();
+      setTimeout(() => { if($("#addUserMsg")) $("#addUserMsg").textContent = ""; }, 3000);
+    }catch(err){
+      $("#addUserMsg").style.color = "var(--red)";
+      $("#addUserMsg").textContent = "Couldn't create user: " + err.message;
+    }finally{
+      btn.disabled = false;
+    }
+  }
+
+  async function saveUserProfile(username, btn){
+    const displayName = document.querySelector(`input[data-name-for="${CSS.escape(username)}"]`).value.trim();
+    const role = document.querySelector(`select[data-role-for="${CSS.escape(username)}"]`).value;
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = "Saving…";
+    try{
+      await sheetFetch({ action: "updateUserProfile", username, displayName, role });
+      btn.textContent = "Saved ✓";
+      setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 1500);
+      if(username === session.username && role !== session.role){
+        alert("Your permissions will update on your next action.");
+      }
+    }catch(err){
+      alert("Could not save: " + err.message);
+      btn.textContent = originalText;
+      btn.disabled = false;
+    }
+  }
+
+  async function changeUserPasswordFlow(username, btn){
+    const input = document.querySelector(`input[data-newpass-for="${CSS.escape(username)}"]`);
+    const newPassword = input.value;
+    if(!newPassword){
+      alert("Enter a new password first.");
+      return;
+    }
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = "Setting…";
+    try{
+      await sheetFetch({ action: "changeUserPassword", username, newPassword });
+      input.value = "";
+      btn.textContent = "Set ✓";
+      setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 1500);
+    }catch(err){
+      alert("Could not set password: " + err.message);
+      btn.textContent = originalText;
+      btn.disabled = false;
+    }
+  }
+
+  async function deleteUserFlow(username){
+    if(username === session.username){
+      alert("You can't delete your own account while logged in.");
+      return;
+    }
+    if(!confirm(`Delete user "${username}" permanently?`)) return;
+    try{
+      await sheetFetch({ action: "deleteUser", username });
+      await loadUsers();
+    }catch(err){
+      alert("Could not delete user: " + err.message);
+    }
+  }
+
+  // ---------- Sound alerts ----------
+  // Every message the app shows — popups, inline warnings, confirmations,
+  // deadline alerts — plays a short tone so it's noticed even when the tab
+  // isn't in focus. Four distinct patterns so the kind is audible too.
+  const SOUND_PATTERNS = {
+    deadline: { type:"square", gain:0.2,  notes:[880,660,880,660,880], dur:0.22, gap:0.1 },
+    warning:  { type:"square", gain:0.16, notes:[740,740,740],         dur:0.2,  gap:0.12 },
+    info:     { type:"sine",   gain:0.18, notes:[660,880],             dur:0.16, gap:0.06 },
+    success:  { type:"sine",   gain:0.18, notes:[523,659,784],         dur:0.13, gap:0.05 }
+  };
+
+  let audioCtx = null;
+  let pendingSoundKind = null;
+
+  function getAudioCtx(){
+    if(!audioCtx){
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if(!AC) return null;
+      audioCtx = new AC();
+    }
+    return audioCtx;
+  }
+
+  function scheduleSound(ctx, kind){
+    const p = SOUND_PATTERNS[kind] || SOUND_PATTERNS.warning;
+    let t = ctx.currentTime + 0.02;
+    p.notes.forEach(freq => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = p.type;
+      osc.frequency.value = freq;
+      gain.gain.value = p.gain;
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(t);
+      osc.stop(t + p.dur);
+      t += p.dur + p.gap;
+    });
+  }
+
+  function flushPendingSound(){
+    const ctx = audioCtx;
+    if(ctx && ctx.state === "running" && pendingSoundKind){
+      const kind = pendingSoundKind;
+      pendingSoundKind = null;
+      scheduleSound(ctx, kind);
+    }
+  }
+
+  function playBuzzer(kind){
+    if(settings.soundOff) return;   // personal mute — messages still show, just silently
+    try{
+      const ctx = getAudioCtx();
+      if(!ctx) return;
+      if(ctx.state === "running"){ scheduleSound(ctx, kind || "warning"); return; }
+      // Browsers keep audio blocked until the person has interacted with the
+      // page. Remember the sound and play it the moment audio is allowed.
+      pendingSoundKind = kind || "warning";
+      ctx.resume().then(flushPendingSound).catch(() => {});
+    }catch(e){}
+  }
+
+  function classifyMessage(text){
+    const t = String(text || "").toLowerCase();
+    if(/deadline|overdue|due today|due tomorrow/.test(t)) return "deadline";
+    if(/required|blocked|cannot|can't|could not|couldn't|not saved|error|only an admin|incorrect|not connected|violat|exceed|declined|notice|loss|failed|invalid|expired|not authenticated|permission|reset/.test(t)) return "warning";
+    if(/saved|updated|created|restored|password updated/.test(t)) return "success";
+    return "info";
+  }
+
+  // Route every native dialog through the sound system, so no message
+  // anywhere in the app is silent.
+  const nativeAlert = window.alert.bind(window);
+  const nativeConfirm = window.confirm.bind(window);
+  const nativePrompt = window.prompt.bind(window);
+  window.alert = (msg) => { playBuzzer(classifyMessage(msg)); return nativeAlert(msg); };
+  window.confirm = (msg) => { playBuzzer("info"); return nativeConfirm(msg); };
+  window.prompt = (msg, def) => { playBuzzer("info"); return nativePrompt(msg, def); };
+
+  function updateSoundToggle(){
+    const btn = $("#soundToggleBtn");
+    if(!btn) return;
+    btn.innerHTML = settings.soundOff ? "&#128277; Sound off" : "&#128276; Sound on";
+    btn.setAttribute("aria-pressed", settings.soundOff ? "true" : "false");
+  }
+
+  function initSoundAlerts(){
+    updateSoundToggle();
+    $("#soundToggleBtn").addEventListener("click", async () => {
+      settings.soundOff = !settings.soundOff;
+      pendingSoundKind = null;
+      await persistSettings();
+      updateSoundToggle();
+      if(!settings.soundOff) playBuzzer("info");   // short chime so you can hear it's back on
+    });
+    // Create/resume the audio context on the first touch, click or key press
+    // so later sounds (including ones triggered by background loads) play.
+    const unlock = () => {
+      const ctx = getAudioCtx();
+      if(ctx) ctx.resume().then(flushPendingSound).catch(() => {});
+    };
+    ["pointerdown","keydown","touchstart"].forEach(ev => document.addEventListener(ev, unlock, { passive:true }));
+
+    // Inline messages: sound whenever one of these gets new text.
+    const colorKind = (el, text) => {
+      const c = (el.style.color || "").toLowerCase();
+      return (c.includes("red") || c.includes("e09a8f")) ? "warning" : classifyMessage(text);
+    };
+    ["saveMsg","loginError","signupError","changePasswordMsg","appearanceMsg"].forEach(id => {
+      const el = document.getElementById(id);
+      if(!el) return;
+      new MutationObserver(() => {
+        const text = (el.textContent || "").trim();
+        if(!text || /…$/.test(text)) return;                       // cleared, or an in-progress "Saving…"
+        if(el.classList.contains("login-error") && !el.classList.contains("show")) return;
+        playBuzzer(colorKind(el, text));
+      }).observe(el, { childList:true, characterData:true, subtree:true, attributes:true, attributeFilter:["class"] });
+    });
+
+    // Warning boxes that appear on their own (duplicate code, RM approval needed).
+    [["dupWarning","warning"], ["rmApprovalBox","warning"]].forEach(([id, kind]) => {
+      const el = document.getElementById(id);
+      if(!el) return;
+      const isVisible = () => el.classList.contains("show") || el.style.display === "block";
+      let wasVisible = isVisible();
+      new MutationObserver(() => {
+        const nowVisible = isVisible();
+        if(nowVisible && !wasVisible) playBuzzer(kind);
+        wasVisible = nowVisible;
+      }).observe(el, { attributes:true, attributeFilter:["class","style"] });
+    });
+  }
+
+  // Marks an entry that was edited by someone other than a moderator/admin and
+  // is waiting for Account Approval again. Stored as the start of the Accounts
+  // Remark, so it needs no extra Sheet column and is replaced by the real
+  // remark when a moderator/admin approves.
+  const REAPPROVAL_PREFIX = "Edited by ";
+
+  // Moderators and admins don't have to refresh: while signed in, the
+  // dashboard re-syncs every 30 seconds, and a deadline buzzer sounds when
+  // something new needs approval.
+  const SYNC_INTERVAL_MS = 30000;
+  let syncInFlight = false;
+  let approvalWatchTimer = null;
+  let knownAttentionKeys = new Set();
+
+  function attentionKeys(){
+    const today = localDateStr(new Date());
+    const keys = new Set();
+    visibleQueries().forEach(q => {
+      const dl = cleanDateStr(q.paymentDeadline);
+      if(!dl || cleanDateStr(q.deadlineApprovedFor) === dl) return;
+      const diff = Math.round((new Date(dl) - new Date(today)) / 86400000);
+      if(diff <= 2) keys.add(q.id + "|" + dl + "|" + (q.accountsRemark || ""));
+    });
+    return keys;
+  }
+
+  function stopApprovalWatch(){
+    if(approvalWatchTimer){ clearInterval(approvalWatchTimer); approvalWatchTimer = null; }
+  }
+
+  function startApprovalWatch(){
+    stopApprovalWatch();
+    if(!settings.sheetUrl || (session.role !== "admin" && session.role !== "moderator")) return;
+    knownAttentionKeys = attentionKeys();
+    approvalWatchTimer = setInterval(async () => {
+      // Skip this tick if signed out, if the last sync is still running, or
+      // while an entry is being saved (don't swap the list mid-save).
+      if(!session.token || syncInFlight || saveInFlight) return;
+      syncInFlight = true;
+      try{
+        const remote = await sheetList();
+        if(saveInFlight) return;               // a save started while we were fetching
+        queries = remote;
+        await persistQueriesLocalOnly();
+        renderAll();
+        loadPendingSignups();                  // keeps the Signup Requests badge current
+        const current = attentionKeys();
+        let fresh = false;
+        current.forEach(k => { if(!knownAttentionKeys.has(k)) fresh = true; });
+        knownAttentionKeys = current;
+        if(fresh) playBuzzer("deadline");
+      }catch(err){ /* transient network error — try again at the next tick */
+      }finally{ syncInFlight = false; }
+    }, SYNC_INTERVAL_MS);
+  }
+
+  // Alerts on sign-in for anything deadline-related that nobody has
+  // acknowledged yet: passed, due today, tomorrow, or in 2 days. Entries
+  // already given Account Approval for their current deadline are left out.
+  function checkPaymentDeadlines(){
+    const today = localDateStr(new Date());
+    const groups = { passed: [], today: [], tomorrow: [], two: [] };
+    visibleQueries().forEach(q => {
+      const dl = cleanDateStr(q.paymentDeadline);
+      if(!dl) return;
+      if(cleanDateStr(q.deadlineApprovedFor) === dl) return;
+      const diff = Math.round((new Date(dl) - new Date(today)) / 86400000);
+      if(diff < 0) groups.passed.push(q.code);
+      else if(diff === 0) groups.today.push(q.code);
+      else if(diff === 1) groups.tomorrow.push(q.code);
+      else if(diff === 2) groups.two.push(q.code);
+    });
+    const lines = [];
+    if(groups.passed.length)   lines.push("DEADLINE PASSED: " + groups.passed.join(", "));
+    if(groups.today.length)    lines.push("Payment due today: " + groups.today.join(", "));
+    if(groups.tomorrow.length) lines.push("Payment due tomorrow: " + groups.tomorrow.join(", "));
+    if(groups.two.length)      lines.push("Payment due in 2 days: " + groups.two.join(", "));
+    if(lines.length){
+      alert("⏰ PAYMENT DEADLINE ALERT\n\n" + lines.join("\n") + "\n\nSee Deadline Bookings Data on the Dashboard.");
+    }
+  }
+
+  async function loadAll(){
+    try{
+      const res = await sysStorage.get(SETTINGS_KEY);
+      settings = res && res.value ? JSON.parse(res.value) : { myName: "", sheetUrl: "" };
+    }catch(e){ settings = { myName: "", sheetUrl: "" }; }
+
+    // The baked-in DEFAULT_SHEET_URL always wins when it's set — this
+    // guarantees every session connects to the canonical linked sheet
+    // rather than getting stuck on a stale URL cached from an earlier
+    // deployment. If DEFAULT_SHEET_URL is left blank, fall back to
+    // whatever was previously connected locally.
+    if(DEFAULT_SHEET_URL){
+      settings.sheetUrl = DEFAULT_SHEET_URL;
+    }
+
+    $("#myNameInput").value = settings.myName || "";
+    $("#sheetUrlInput").value = settings.sheetUrl || "";
+
+    try{
+      const res = await sysStorage.get(SESSION_KEY);
+      session = res && res.value ? JSON.parse(res.value) : { token:"", username:"", displayName:"", role:"" };
+    }catch(e){ session = { token:"", username:"", displayName:"", role:"" }; }
+
+    try{
+      const res = await sysStorage.get(STORAGE_KEY);
+      queries = res && res.value ? JSON.parse(res.value) : [];
+    }catch(e){ queries = []; }
+  }
+
+  async function persistQueriesLocalOnly(){
+    try{ await sysStorage.set(STORAGE_KEY, JSON.stringify(queries)); }
+    catch(e){ console.error("Storage error", e); }
+  }
+
+  async function persistSettings(){
+    try{ await sysStorage.set(SETTINGS_KEY, JSON.stringify(settings)); }
+    catch(e){ console.error("Storage error", e); }
+  }
+
+  function derive(q){
+    const cost = parseFloat(q.cost) || 0;
+    const sale = parseFloat(q.sale) || 0;
+    const rate = parseFloat(q.rate) || 0;
+    const profit = sale - cost;
+    const costInr = cost * rate;
+    const saleInr = sale * rate;
+    const profitInr = saleInr - costInr;
+    const profitPct = costInr !== 0 ? (profitInr / costInr) * 100 : 0;
+    return { cost, sale, rate, profit, costInr, saleInr, profitInr, profitPct };
+  }
+
+  function renderStats(list){
+    const totals = list.reduce((acc, q) => {
+      const d = derive(q);
+      acc.costInr += d.costInr; acc.saleInr += d.saleInr; acc.profitInr += d.profitInr;
+      return acc;
+    }, { costInr:0, saleInr:0, profitInr:0 });
+    const profitPct = totals.costInr !== 0 ? (totals.profitInr / totals.costInr) * 100 : 0;
+
+    const counts = { Refundable:0, NRF:0, HOLDING:0 };
+    list.forEach(q => { if(counts[q.status] !== undefined) counts[q.status]++; });
+
+    $("#flagRow").innerHTML = `
+      <div class="flag-pill refundable"><span class="dot"></span>Refundable <span class="n">${counts.Refundable}</span></div>
+      <div class="flag-pill nrf"><span class="dot"></span>NRF <span class="n">${counts.NRF}</span></div>
+      <div class="flag-pill holding"><span class="dot"></span>Holding <span class="n">${counts.HOLDING}</span></div>
+    `;
+
+    const profitCount = list.filter(q => derive(q).profit > 0).length;
+    const lossCount = list.filter(q => derive(q).profit < 0).length;
+    $("#profitLossRow").innerHTML = `
+      <div class="flag-pill profit"><span class="dot"></span>Profit <span class="n">${profitCount}</span></div>
+      <div class="flag-pill loss"><span class="dot"></span>Loss <span class="n">${lossCount}</span></div>
+    `;
+
+    const paymentStatusCounts = {};
+    list.forEach(q => {
+      const key = q.paymentStatus || "Unset";
+      paymentStatusCounts[key] = (paymentStatusCounts[key] || 0) + 1;
+    });
+    const paymentStatusOrder = ["IndCash", "Dubai OA", "BranchOA", "Vendor OA", "Bank", "Unset"];
+    $("#paymentStatusRow").innerHTML = paymentStatusOrder
+      .filter(key => paymentStatusCounts[key])
+      .map(key => `<div class="flag-pill paystatus"><span class="dot"></span>${esc(key)} <span class="n">${paymentStatusCounts[key]}</span></div>`)
+      .join("");
+
+    const cards = [
+      { label:"Total Queries", value: list.length, cls:"" },
+      { label:"Total Profit INR", value: "₹" + fmt(totals.profitInr), cls: totals.profitInr>=0?"green":"red" },
+      { label:"INR Profit %", value: fmtPct(profitPct), cls: profitPct>=0?"green":"red" },
+      { label:"Total Cost INR", value: "₹" + fmt(totals.costInr), cls:"" },
+      { label:"Total Sale INR", value: "₹" + fmt(totals.saleInr), cls:"" },
+    ];
+    $("#statGrid").innerHTML = cards.map(c => `
+      <div class="stat-card ${c.cls}">
+        <div class="label">${c.label}</div>
+        <div class="value num">${c.value}</div>
+      </div>
+    `).join("");
+
+    const byCurrency = {};
+    list.forEach(q => {
+      const d = derive(q);
+      const cur = q.currency || "USD";
+      if(!byCurrency[cur]) byCurrency[cur] = { count:0, cost:0, sale:0, profit:0 };
+      byCurrency[cur].count++;
+      byCurrency[cur].cost += d.cost;
+      byCurrency[cur].sale += d.sale;
+      byCurrency[cur].profit += d.profit;
+    });
+    const currencyKeys = Object.keys(byCurrency).sort();
+    $("#currencyTotalsBody").innerHTML = currencyKeys.map(cur => {
+      const c = byCurrency[cur];
+      const profitClass = c.profit >= 0 ? "profit-pos" : "profit-neg";
+      return `<tr>
+        <td><strong>${esc(cur)}</strong></td>
+        <td class="num">${c.count}</td>
+        <td class="num">${fmt(c.cost)}</td>
+        <td class="num">${fmt(c.sale)}</td>
+        <td class="num ${profitClass}">${fmt(c.profit)}</td>
+      </tr>`;
+    }).join("");
+    $("#currencyTotalsEmpty").style.display = currencyKeys.length ? "none" : "block";
+  }
+
+  function esc(s){
+    if(s === undefined || s === null) return "";
+    return String(s).replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+  }
+
+  function rowHtml(q, mode){
+    const d = derive(q);
+    const profitClass = d.profit >= 0 ? "profit-pos" : "profit-neg";
+    const profitInrClass = d.profitInr >= 0 ? "profit-pos" : "profit-neg";
+    const today = localDateStr(new Date());
+    const deadlineToday = q.paymentDeadline && cleanDateStr(q.paymentDeadline) === today;
+    if(mode === "dash"){
+      return `<tr data-id="${q.id}"${deadlineToday ? ' class="deadline-today"' : ''}>
+        <td><strong>${esc(q.code)}</strong></td>
+        <td><span class="badge ${q.status}">${q.status}</span></td>
+        <td>${esc(fmtStamp(q.savedAt))||"—"}</td>
+        <td>${esc(fmtDate(q.approvalDate))||"—"}</td>
+        <td>${esc(q.handledBy)||"—"}</td>
+        <td>${esc(q.agency)||"—"}</td>
+        <td>${esc(q.destination)||"—"}</td>
+        <td>${esc(q.vendor)||"—"}</td>
+        <td>${esc(q.serviceType)||"—"}</td>
+        <td>${esc(q.invoiceNumber)||"—"}</td>
+        <td>${esc(fmtDate(q.invoiceDate))||"—"}</td>
+        <td>${esc(fmtDate(q.checkIn))||"—"}</td>
+        <td>${esc(fmtDate(q.checkOut))||"—"}</td>
+        <td>${esc(q.currency)||"—"}</td>
+        <td class="num">${fmt(d.cost)}</td>
+        <td class="num">${fmt(d.sale)}</td>
+        <td class="num ${profitClass}">${fmt(d.profit)}</td>
+        <td class="num">${d.rate || 0}</td>
+        <td class="num">₹${fmt(d.costInr)}</td>
+        <td class="num">₹${fmt(d.saleInr)}</td>
+        <td class="num ${profitInrClass}">₹${fmt(d.profitInr)}</td>
+        <td class="num ${profitInrClass}">${fmtPct(d.profitPct)}</td>
+        <td>${deadlineToday ? '&#9200; ' : ''}${esc(fmtDate(q.paymentDeadline))||"—"}</td>
+        <td class="row-actions"><button class="icon-btn" data-edit="${q.id}">Edit</button></td>
+      </tr>`;
+    } else if(mode === "search"){
+      return `<tr data-id="${q.id}">
+        <td><strong>${esc(q.code)}</strong></td>
+        <td><span class="badge ${q.status}">${q.status}</span></td>
+        <td>${esc(q.agency)||"—"}</td>
+        <td>${esc(q.destination)||"—"}</td>
+        <td>${esc(q.vendor)||"—"}</td>
+        <td>${esc(q.serviceType)||"—"}</td>
+        <td>${esc(q.invoiceNumber)||"—"}</td>
+        <td class="num">${fmt(d.cost)}</td>
+        <td class="num">${fmt(d.sale)}</td>
+        <td class="num ${profitInrClass}">₹${fmt(d.profitInr)}</td>
+        <td class="num ${profitInrClass}">${fmtPct(d.profitPct)}</td>
+        <td>${esc(q.handledBy)||"—"}</td>
+        <td class="row-actions">
+          <button class="icon-btn" data-edit="${q.id}">Edit</button>
+          ${canDelete() ? `<button class="icon-btn" data-del="${q.id}">Delete</button>` : ""}
+        </td>
+      </tr>`;
+    } else {
+      return `<tr data-id="${q.id}">
+        <td><strong>${esc(q.code)}</strong></td>
+        <td><span class="badge ${q.status}">${q.status}</span></td>
+        <td>${esc(q.agency)||"—"}</td>
+        <td>${esc(q.destination)||"—"}</td>
+        <td>${esc(q.vendor)||"—"}</td>
+        <td>${esc(q.serviceType)||"—"}</td>
+        <td class="num">${fmt(d.cost)}</td>
+        <td class="num">${fmt(d.sale)}</td>
+        <td class="num ${profitInrClass}">₹${fmt(d.profitInr)}</td>
+        <td class="num ${profitInrClass}">${fmtPct(d.profitPct)}</td>
+        <td class="row-actions"><button class="icon-btn" data-edit="${q.id}">Edit</button></td>
+      </tr>`;
+    }
+  }
+
+  function recordHaystack(q){
+    const d = derive(q);
+    const approvedTillDate = (q.approvals || []).reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+    const parts = [
+      q.code, q.status, q.paymentStatus, q.docStatus, q.savedAt, q.approvalDate, q.handledBy, q.invoiceDate, q.invoiceNumber,
+      q.agency, q.destination, q.vendor, q.checkIn, q.checkOut, q.serviceType, q.currency, q.costCenter,
+      q.cost, q.sale, q.rate, q.costInr, q.saleInr, d.profit, d.profitInr,
+      q.advanceInr, q.paymentDeadline, approvedTillDate, q.notes,
+      q.rmApproval, q.rmName, q.rmDeadline, q.accountsRemark,
+      q.originalCost, q.originalSale, q.originalDate,
+      (q.approvals || []).map(a => a.remark).join(" ")
+    ];
+    return parts.join(" ").toLowerCase();
+  }
+
+  function renderDashboard(){
+    const term = ($("#dashSearch").value || "").toLowerCase().trim();
+    const status = $("#dashStatusFilter").value;
+    let list = visibleQueries().filter(q => {
+      const matchesTerm = !term || recordHaystack(q).includes(term);
+      const matchesStatus = !status || q.status === status;
+      return matchesTerm && matchesStatus;
+    });
+    renderStats(list);
+    $("#dashTableBody").innerHTML = list.map(q => rowHtml(q,"dash")).join("");
+    $("#dashEmpty").style.display = list.length ? "none" : "block";
+  }
+
+  // Shows bookings whose Payment Deadline falls within the next 2 days
+  // (today, tomorrow, or the day after). Every row here blinks red until
+  // Account Approval is given — recorded with a mandatory Accounts Remark —
+  // which stops the blink. If the deadline is later changed, the approval
+  // no longer matches the new date, so blinking resumes automatically.
+  function renderDeadlineBookings(){
+    const today = new Date(); today.setHours(0,0,0,0);
+    const windowEnd = new Date(today); windowEnd.setDate(today.getDate() + 2);
+    const todayStr = localDateStr(today);
+    const windowEndStr = localDateStr(windowEnd);
+
+    const list = visibleQueries().filter(q => {
+      const dl = cleanDateStr(q.paymentDeadline);
+      return dl && dl <= windowEndStr; // includes anything overdue, plus today through day-after-tomorrow
+    }).sort((a,b) => cleanDateStr(a.paymentDeadline).localeCompare(cleanDateStr(b.paymentDeadline)));
+
+    $("#deadlineTableBody").innerHTML = list.map(q => {
+      const d = derive(q);
+      const dl = cleanDateStr(q.paymentDeadline);
+      const isApproved = cleanDateStr(q.deadlineApprovedFor) === dl;
+      const needsReapproval = !isApproved && (q.accountsRemark || "").startsWith(REAPPROVAL_PREFIX);
+      const diffDays = Math.round((new Date(dl) - new Date(todayStr)) / 86400000);
+      const reTag = needsReapproval ? " — re-approval needed" : "";
+
+      let statusLabel, rowClass;
+      if(diffDays < 0){
+        statusLabel = "Deadline passed" + (isApproved ? " (Approved)" : reTag);
+        rowClass = isApproved ? "deadline-today" : "deadline-blink-dark";
+      } else if(diffDays === 0){
+        statusLabel = "Payment due today" + (isApproved ? " (Approved)" : reTag);
+        rowClass = needsReapproval ? "deadline-blink-dark" : "deadline-today";
+      } else if(diffDays === 1){
+        statusLabel = "Payment due tomorrow" + (isApproved ? " (Approved)" : reTag);
+        rowClass = needsReapproval ? "deadline-blink-dark" : "deadline-upcoming";
+      } else {
+        statusLabel = "Payment due in " + diffDays + " days" + (isApproved ? " (Approved)" : reTag);
+        rowClass = needsReapproval ? "deadline-blink-dark" : "deadline-upcoming";
+      }
+
+      return `<tr data-id="${q.id}" class="${rowClass}">
+        <td><strong>${esc(q.code)}</strong></td>
+        <td><span class="badge ${q.status}">${q.status}</span></td>
+        <td>${esc(q.handledBy)||"—"}</td>
+        <td>${esc(q.agency)||"—"}</td>
+        <td>${esc(q.destination)||"—"}</td>
+        <td>${esc(fmtDate(dl))||"—"}</td>
+        <td>${esc(fmtDate(q.rmDeadline))||"—"}</td>
+        <td>${esc(statusLabel)}</td>
+        <td class="num">${fmt(d.cost)}</td>
+        <td class="num">${fmt(d.sale)}</td>
+        <td>${esc(q.accountsRemark)||"—"}</td>
+        <td class="row-actions">
+          ${(session.role === "admin" || session.role === "moderator")
+            ? `<button type="button" class="icon-btn" data-account-approval="${q.id}" ${isApproved ? "disabled" : ""}>${isApproved ? "Approved" : "Account Approval"}</button>`
+            : (isApproved ? `<span style="font-size:12px; color:var(--ink-soft);">Approved</span>` : "")}
+        </td>
+      </tr>`;
+    }).join("");
+    $("#deadlineEmpty").style.display = list.length ? "none" : "block";
+  }
+
+  async function accountApproveDeadline(id, btn){
+    if(session.role !== "admin" && session.role !== "moderator"){
+      alert("Only an admin or moderator can give Account Approval.");
+      return;
+    }
+    const q = queries.find(x => x.id === id);
+    if(!q) return;
+    const remark = prompt(`Accounts Remark for "${q.code}" (required to approve):`);
+    if(remark === null) return; // cancelled
+    if(!remark.trim()){
+      alert("Accounts Remark is required to approve this deadline.");
+      return;
+    }
+    const updated = Object.assign({}, q, { deadlineApprovedFor: q.paymentDeadline, accountsRemark: remark.trim() });
+    if(btn){ btn.disabled = true; btn.textContent = "Approving…"; }
+    try{
+      if(settings.sheetUrl){
+        await sheetFetch({ action: "upsert", record: updated });
+      }
+      const idx = queries.findIndex(x => x.id === id);
+      if(idx > -1) queries[idx] = updated;
+      await persistQueriesLocalOnly();
+      renderAll();
+    }catch(err){
+      alert("Could not approve: " + err.message);
+      if(btn){ btn.disabled = false; btn.textContent = "Account Approval"; }
+    }
+  }
+
+  function renderSearch(){
+    const term = ($("#searchInput").value || "").toLowerCase().trim();
+    const status = $("#searchStatusFilter").value;
+    let list = visibleQueries().filter(q => {
+      const matchesTerm = !term || recordHaystack(q).includes(term);
+      const matchesStatus = !status || q.status === status;
+      return matchesTerm && matchesStatus;
+    });
+    $("#searchTableBody").innerHTML = list.map(q => rowHtml(q,"search")).join("");
+    $("#searchEmpty").style.display = list.length ? "none" : "block";
+  }
+
+  function renderMine(){
+    const name = (settings.myName || "").trim().toLowerCase();
+    $("#mineSub").textContent = name ? `Queries handled by "${settings.myName}".` : "Set your name in the sidebar to see your entries.";
+    if(!name){
+      $("#mineTableBody").innerHTML = "";
+      $("#mineEmpty").style.display = "block";
+      $("#mineEmptyMsg").textContent = "Set your name in the sidebar to see your entries.";
+      return;
+    }
+    const list = visibleQueries().filter(q => (q.handledBy||"").trim().toLowerCase() === name);
+    $("#mineTableBody").innerHTML = list.map(q => rowHtml(q,"mine")).join("");
+    $("#mineEmpty").style.display = list.length ? "none" : "block";
+    $("#mineEmptyMsg").textContent = "No entries under your name yet.";
+  }
+
+  function renderAll(){
+    renderDashboard();
+    renderDeadlineBookings();
+    renderSearch();
+    renderMine();
+  }
+
+  function findDuplicate(code, excludeId){
+    const c = (code||"").trim().toLowerCase();
+    if(!c) return null;
+    return queries.find(q => q.id !== excludeId && (q.code||"").trim().toLowerCase() === c) || null;
+  }
+
+  function readForm(){
+    return {
+      approvalDate: $("#f_approvaldate").value,
+      handledBy: $("#f_handledby").value.trim(),
+      code: $("#f_code").value.trim(),
+      invoiceDate: $("#f_invoicedate").value,
+      invoiceNumber: $("#f_invoicenumber").value.trim(),
+      agency: $("#f_agency").value.trim(),
+      destination: $("#f_destination").value.trim(),
+      vendor: $("#f_vendor").value.trim(),
+      checkIn: $("#f_checkin").value,
+      checkOut: $("#f_checkout").value,
+      serviceType: $("#f_servicetype").value,
+      currency: $("#f_currency").value.trim().toUpperCase(),
+      costCenter: $("#f_costcenter").value.trim(),
+      status: $("#f_status").value,
+      paymentStatus: $("#f_payment_status").value,
+      docStatus: $("#f_doc_status").value,
+      cost: parseFloat($("#f_cost").value) || 0,
+      sale: parseFloat($("#f_sale").value) || 0,
+      rate: parseFloat($("#f_rate").value) || 0,
+      advanceInr: parseFloat($("#f_advance_inr").value) || 0,
+      paymentDeadline: $("#f_payment_deadline").disabled ? "" : $("#f_payment_deadline").value,
+      rmApproval: $("#f_rm_approval").value,
+      rmName: $("#f_rm_name").value.trim(),
+      rmDeadline: $("#f_rm_deadline").value,
+      notes: $("#f_notes").value.trim(),
+    };
+  }
+
+  function advanceInCurrency(data){
+    const rate = parseFloat(data.rate) || 0;
+    const advanceInr = parseFloat(data.advanceInr) || 0;
+    return rate > 0 ? advanceInr / rate : 0;
+  }
+
+  function updatePaymentDeadlineEnablement(){
+    const status = $("#f_status").value;
+    const enable = status === "Refundable";
+    const el = $("#f_payment_deadline");
+    el.disabled = !enable;
+    el.required = enable;
+    if(!enable){ el.value = ""; }
+    $("#paymentDeadlineHint").textContent = enable
+      ? "Required for Refundable bookings — alert triggers on date."
+      : "Only applicable to Refundable bookings.";
+  }
+
+  function updateCalcPreview(){
+    updatePaymentDeadlineEnablement();
+    const data = readForm();
+    const d = derive(data);
+    $("#cp_profit").textContent = fmt(d.profit);
+    $("#cp_costinr").textContent = "₹" + fmt(d.costInr);
+    $("#cp_saleinr").textContent = "₹" + fmt(d.saleInr);
+    $("#cp_profitinr").textContent = "₹" + fmt(d.profitInr);
+    $("#cp_profitpct").textContent = fmtPct(d.profitPct);
+    $("#f_costinr_display").value = "₹" + fmt(d.costInr);
+    $("#f_saleinr_display").value = "₹" + fmt(d.saleInr);
+    $("#costCurrencyLabel").textContent = data.currency || "USD";
+    $("#saleCurrencyLabel").textContent = data.currency || "USD";
+    $("#advanceCurrencyLabel").textContent = data.currency || "USD/AED";
+    $("#advanceCurrencyReadout").querySelector(".num").textContent = fmt(advanceInCurrency(data));
+    const remainingDue = d.saleInr - (parseFloat(data.advanceInr) || 0);
+    $("#f_remaining_due_display").value = "₹" + fmt(remainingDue);
+    $("#f_remaining_due_display").style.color = remainingDue < 0 ? "var(--red)" : "var(--brass)";
+    renderApprovalsTable();
+  }
+
+  // Pulls a live currency->INR rate via Google Finance, through the
+  // connected Sheet's Apps Script backend (GOOGLEFINANCE runs server-side).
+  // silent=true suppresses error alerts (used for the automatic on-currency-change
+  // suggestion, so it doesn't nag if the lookup fails); the manual button always alerts.
+  async function fetchSuggestedRate(silent){
+    const currency = $("#f_currency").value.trim().toUpperCase();
+    if(!/^[A-Z]{3}$/.test(currency)){
+      if(!silent) alert("Enter a valid 3-letter currency code first.");
+      return;
+    }
+    if(!settings.sheetUrl){
+      if(!silent) alert("Connect a Google Sheet first — rate suggestions are fetched through it.");
+      return;
+    }
+    const btn = $("#suggestRateBtn");
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "…";
+    try{
+      const result = await sheetFetch({ action: "getRate", currency });
+      if(result && result.rate){
+        $("#f_rate").value = Number(result.rate).toFixed(4);
+        $("#rateHint").textContent = "Suggested from Google Finance — you can edit this.";
+        updateCalcPreview();
+      }
+    }catch(err){
+      if(!silent) alert("Couldn't fetch a rate: " + err.message);
+    }finally{
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
+
+  function renderApprovalsTable(){
+    const data = readForm();
+    const cost = data.cost;
+    const total = pendingApprovals.reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+    const remaining = cost - total;
+    $("#approvalsTableBody").innerHTML = pendingApprovals.map(a => `
+      <tr data-id="${a.id}">
+        <td>${esc(a.date)}</td>
+        <td>${esc(a.time)}</td>
+        <td class="num">${fmt(parseFloat(a.amount)||0)}</td>
+        <td>${esc(a.remark)||"—"}</td>
+        <td class="row-actions"><button type="button" class="icon-btn" data-rmap="${a.id}">Remove</button></td>
+      </tr>
+    `).join("");
+    $("#approvalsTotal").textContent = fmt(total);
+    $("#approvalsRemaining").innerHTML = `<span style="font-weight:700; color:${remaining < 0 ? "var(--red)" : "var(--ink-soft)"}">Remaining vs cost: ${fmt(remaining)}</span>`;
+    $("#approvalsEmpty").style.display = pendingApprovals.length ? "none" : "block";
+    updateRmApprovalVisibility();
+  }
+
+  // Shows the RM Approval workflow whenever the booking is NRF — always,
+  // unconditionally — or whenever approvals exceed Advance Received, or
+  // Advance Received is left blank at all while any approval exists.
+  // Doesn't block saving on its own — it requires RM sign-off (Yes/No),
+  // then RM name, then a deadline date, in that order, before the form
+  // can actually be saved.
+  function rmApprovalRequired(data){
+    if(data.status === "NRF") return true;
+    const advanceBlank = !$("#f_advance_inr").value.trim();
+    const total = pendingApprovals.reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+    if(total <= 0) return false; // nothing approved yet — nothing to require
+    if(advanceBlank) return true; // blank advance -> mandatory
+    const advCur = advanceInCurrency(data);
+    return total > advCur + 0.005;
+  }
+
+  function updateRmApprovalVisibility(){
+    const data = readForm();
+    const exceedsAdvance = rmApprovalRequired(data);
+    const advanceBlank = !$("#f_advance_inr").value.trim();
+
+    $("#rmApprovalBox").style.display = exceedsAdvance ? "block" : "none";
+    if(exceedsAdvance){
+      if(data.status === "NRF"){
+        $("#rmApprovalTitle").innerHTML = "&#9888; NRF booking — RM Approval required";
+      } else if(advanceBlank){
+        $("#rmApprovalTitle").innerHTML = "&#9888; Advance Received is blank — RM Approval required";
+      } else {
+        $("#rmApprovalTitle").innerHTML = "&#9888; Approvals exceed Advance Received — RM Approval required";
+      }
+    }
+
+    const rmApproval = $("#f_rm_approval").value;
+    $("#rmNameWrap").style.display = (exceedsAdvance && rmApproval === "Yes") ? "flex" : "none";
+
+    const rmName = $("#f_rm_name").value.trim();
+    $("#rmDeadlineWrap").style.display = (exceedsAdvance && rmApproval === "Yes" && rmName) ? "flex" : "none";
+  }
+
+  function addApproval(){
+    const amountInput = $("#ap_amount");
+    const amount = parseFloat(amountInput.value);
+    const remark = $("#ap_remark").value.trim();
+    if(!amount || amount <= 0){
+      alert("Enter a valid approval amount.");
+      return;
+    }
+    const data = readForm();
+    const cost = data.cost;
+    const currentTotal = pendingApprovals.reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+    if(currentTotal + amount > cost + 0.005){
+      alert("Approval exceeds cost amount (" + fmt(cost) + "). Reduce approval amount or increase cost.");
+      return;
+    }
+    const now = new Date();
+    pendingApprovals.push({
+      id: uid(),
+      date: now.toLocaleDateString(undefined, { day:"2-digit", month:"short", year:"numeric" }),
+      time: now.toLocaleTimeString(undefined, { hour:"2-digit", minute:"2-digit" }),
+      amount, remark
+    });
+    amountInput.value = "";
+    $("#ap_remark").value = "";
+    renderApprovalsTable();
+  }
+
+  function removeApproval(id){
+    pendingApprovals = pendingApprovals.filter(a => a.id !== id);
+    renderApprovalsTable();
+  }
+
+  function computeDiff(oldRecord, newData){
+    const changes = [];
+    Object.keys(FIELD_LABELS).forEach(key => {
+      const oldRaw = (oldRecord && oldRecord[key] !== undefined && oldRecord[key] !== null) ? oldRecord[key] : "";
+      const newRaw = (newData[key] !== undefined && newData[key] !== null) ? newData[key] : "";
+      const oldVal = cleanDateStr(oldRaw).trim();
+      const newVal = cleanDateStr(newRaw).trim();
+      if(oldVal !== newVal){
+        changes.push(FIELD_LABELS[key] + ": " + (oldVal || "—") + " → " + (newVal || "—"));
+      }
+    });
+    return changes;
+  }
+
+  // The aggregate "Supplier Payment Approval till date" line in computeDiff
+  // only shows the total moved — this itemizes exactly which approval lines
+  // were added or removed during the edit, so the log shows the full picture.
+  function computeApprovalChanges(oldApprovals, newApprovals){
+    const oldIds = new Set((oldApprovals||[]).map(a => a.id));
+    const newIds = new Set((newApprovals||[]).map(a => a.id));
+    const changes = [];
+    (newApprovals||[]).forEach(a => {
+      if(!oldIds.has(a.id)){
+        changes.push("Approval added: " + fmt(parseFloat(a.amount)||0) + (a.remark ? " (" + a.remark + ")" : "") + " — " + a.date + " " + a.time);
+      }
+    });
+    (oldApprovals||[]).forEach(a => {
+      if(!newIds.has(a.id)){
+        changes.push("Approval removed: " + fmt(parseFloat(a.amount)||0) + (a.remark ? " (" + a.remark + ")" : ""));
+      }
+    });
+    return changes;
+  }
+
+  function renderEditLog(){
+    const sorted = pendingEditLog.slice().sort((a,b) => (a.ts||0) - (b.ts||0));
+    $("#editLogList").innerHTML = sorted.map(entry => `
+      <div class="log-line">
+        <span class="log-ts">${esc(entry.timestamp)}</span>
+        <span class="log-who">${esc(entry.handledBy)||"—"}</span> —
+        <span class="log-changes">${esc(scrubIsoInText((entry.changes||[]).join("; ")))||esc(entry.action)}</span>
+      </div>
+    `).join("");
+    $("#editLogEmpty").style.display = pendingEditLog.length ? "none" : "block";
+  }
+
+  function checkDuplicateLive(){
+    const code = $("#f_code").value;
+    const dup = findDuplicate(code, editingId);
+    $("#dupWarning").classList.toggle("show", !!(dup && !editingId));
+    $("#dupOk").classList.remove("show");
+  }
+
+  function resetForm(){
+    editingId = null;
+    $("#queryForm").reset();
+    $("#f_status").value = "";
+    $("#f_payment_status").value = "";
+    $("#f_doc_status").value = "";
+    $("#f_servicetype").value = "HOTEL";
+    $("#f_currency").value = "USD";
+    $("#f_costcenter").value = "";
+    $("#f_handledby").value = (session.role === "restricted" && session.displayName) ? session.displayName : (settings.myName || "");
+    $("#f_handledby").readOnly = (session.role === "restricted" && !!session.displayName);
+    const today = new Date().toISOString().slice(0,10);
+    $("#f_approvaldate").value = today;
+    $("#formTitle").textContent = "New Query";
+    $("#formSub").textContent = "Add a query to the shared ledger.";
+    $("#cancelEditBtn").style.display = "none";
+    $("#saveMsg").textContent = "";
+    $("#dupWarning").classList.remove("show");
+    $("#dupOk").classList.remove("show");
+    $("#f_rm_approval").value = "";
+    $("#f_rm_name").value = "";
+    $("#f_rm_deadline").value = "";
+    pendingApprovals = [];
+    renderApprovalsTable();
+    pendingEditLog = [];
+    renderEditLog();
+    $("#origRef").style.display = "none";
+    updateCalcPreview();
+  }
+
+  // Admin-only testing helper — fills every field on the New Query form
+  // with sample data for a Refundable booking, including one Approval
+  // History entry, so a full save can be exercised without hand-typing.
+  function fillSampleRefundableBooking(){
+    resetForm();
+    const today = new Date();
+    const iso = (d) => d.toISOString().slice(0,10);
+    const addDays = (d,n) => { const r = new Date(d); r.setDate(r.getDate()+n); return r; };
+    const suffix = Date.now().toString().slice(-6);
+
+    $("#f_approvaldate").value = iso(today);
+    $("#f_handledby").value = settings.myName || session.displayName || "Admin";
+    $("#f_code").value = "SAMPLE-" + suffix;
+    $("#f_invoicedate").value = iso(today);
+    $("#f_invoicenumber").value = "INV-SAMPLE-" + suffix;
+    $("#f_agency").value = "Sample Travels";
+    $("#f_destination").value = "DXB";
+    $("#f_vendor").value = "Sample Vendor Co";
+    $("#f_checkin").value = iso(addDays(today,7));
+    $("#f_checkout").value = iso(addDays(today,10));
+    $("#f_servicetype").value = "HOTEL";
+    $("#f_currency").value = "USD";
+    $("#f_costcenter").value = "RAJ";
+
+    $("#f_status").value = "Refundable";
+    $("#f_cost").value = "1000";
+    $("#f_sale").value = "1300";
+    $("#f_rate").value = "87.5000";
+    $("#f_advance_inr").value = "50000";
+    $("#f_notes").value = "Sample entry for testing purposes.";
+
+    updateCalcPreview(); // unlocks Payment Deadline now that status is Refundable
+
+    $("#f_payment_deadline").value = iso(addDays(today,5));
+
+    pendingApprovals = [{
+      id: uid(),
+      date: today.toLocaleDateString(undefined, { day:"2-digit", month:"short", year:"numeric" }),
+      time: today.toLocaleTimeString(undefined, { hour:"2-digit", minute:"2-digit" }),
+      amount: 500,
+      remark: "Sample advance to vendor"
+    }];
+    renderApprovalsTable();
+
+    updateCalcPreview();
+    checkDuplicateLive();
+  }
+
+  function loadIntoForm(q){
+    if(!canEditRecord(q)){
+      alert("You can only edit entries handled by you.");
+      return;
+    }
+    editingId = q.id;
+    $("#f_approvaldate").value = cleanDateStr(q.approvalDate);
+    $("#f_handledby").value = q.handledBy || "";
+    $("#f_handledby").readOnly = (session.role === "restricted" && !!session.displayName);
+    $("#f_code").value = q.code || "";
+    $("#f_invoicedate").value = cleanDateStr(q.invoiceDate);
+    $("#f_invoicenumber").value = q.invoiceNumber || "";
+    $("#f_agency").value = q.agency || "";
+    $("#f_destination").value = q.destination || "";
+    $("#f_vendor").value = q.vendor || "";
+    $("#f_checkin").value = cleanDateStr(q.checkIn);
+    $("#f_checkout").value = cleanDateStr(q.checkOut);
+    $("#f_servicetype").value = q.serviceType || "HOTEL";
+    $("#f_currency").value = q.currency || "USD";
+    $("#f_costcenter").value = q.costCenter || "";
+    $("#f_status").value = q.status || "";
+    $("#f_payment_status").value = q.paymentStatus || "";
+    $("#f_doc_status").value = q.docStatus || "";
+    $("#f_cost").value = q.cost ?? "";
+    $("#f_sale").value = q.sale ?? "";
+    $("#f_rate").value = q.rate ?? "";
+    $("#f_advance_inr").value = q.advanceInr ?? "";
+    $("#f_payment_deadline").value = cleanDateStr(q.paymentDeadline);
+    $("#f_rm_approval").value = q.rmApproval || "";
+    $("#f_rm_name").value = q.rmName || "";
+    $("#f_rm_deadline").value = cleanDateStr(q.rmDeadline);
+    $("#f_notes").value = q.notes || "";
+    $("#formTitle").textContent = "Edit Query — " + q.code;
+    $("#formSub").textContent = "Updating original record.";
+    $("#cancelEditBtn").style.display = "inline-flex";
+    $("#saveMsg").textContent = "";
+    $("#dupWarning").classList.remove("show");
+
+    pendingApprovals = (q.approvals || []).map(a => Object.assign({}, a));
+    renderApprovalsTable();
+
+    pendingEditLog = (q.editLog || []).map(a => Object.assign({}, a));
+    renderEditLog();
+
+    if(q.originalCost != null){
+      $("#origRef").style.display = "block";
+      $("#origCostVal").textContent = fmt(q.originalCost);
+      $("#origSaleVal").textContent = fmt(q.originalSale);
+      $("#origDateVal").textContent = q.originalDate ? ("on " + q.originalDate) : "";
+    } else {
+      $("#origRef").style.display = "none";
+    }
+
+    updateCalcPreview();
+    switchView("newquery");
+  }
+
+  // While an entry is being saved, nothing else on the page can be clicked or
+  // tabbed to — the overlay blocks the mouse/touch, `inert` blocks the keyboard.
+  let saveInFlight = false;
+  function setSaveLock(on){
+    saveInFlight = on;
+    $("#saveLock").hidden = !on;
+    document.querySelectorAll(".shell, .mobile-bar").forEach(el => {
+      if(on) el.setAttribute("inert", ""); else el.removeAttribute("inert");
+    });
+    if(on && document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  }
+
+  async function handleSubmit(e){
+    e.preventDefault();
+    if(saveInFlight) return;
+    const data = readForm();
+    if(!data.code){ return; }
+
+    if(session.role === "restricted" && session.displayName){
+      if(editingId){
+        const existing = queries.find(q => q.id === editingId);
+        if(existing && !canEditRecord(existing)){
+          alert("You can only edit entries handled by you.");
+          return;
+        }
+      }
+      data.handledBy = session.displayName; // can't be reassigned away, even via devtools
+    }
+
+    const dup = findDuplicate(data.code, editingId);
+    if(dup && !editingId){
+      $("#dupWarning").classList.add("show");
+      $("#saveMsg").style.color = "var(--red)";
+      $("#saveMsg").textContent = "Blocked: duplicate Query Code.";
+      return;
+    }
+
+    if(data.status === "Refundable" && !data.paymentDeadline){
+      alert("Payment Deadline Date is required for Refundable bookings.");
+      $("#f_payment_deadline").focus();
+      $("#saveMsg").style.color = "var(--red)";
+      $("#saveMsg").textContent = "Blocked: Payment Deadline Date is required.";
+      return;
+    }
+
+    const approvalsTotal = pendingApprovals.reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+    if(approvalsTotal > data.cost + 0.005){
+      alert("Total approvals taken (" + fmt(approvalsTotal) + ") exceed cost amount (" + fmt(data.cost) + "). Amend cost before saving.");
+      $("#saveMsg").style.color = "var(--red)";
+      $("#saveMsg").textContent = "Blocked: approvals exceed cost.";
+      return;
+    }
+
+    const advCurAtSave = advanceInCurrency(data);
+    const exceedsAdvance = rmApprovalRequired(data);
+    if(exceedsAdvance){
+      if(data.rmApproval !== "Yes" && data.rmApproval !== "No"){
+        const reason = data.status === "NRF" ? "This is an NRF booking" : ($("#f_advance_inr").value.trim() ? "Approvals exceed Advance Received (" + fmt(advCurAtSave) + ")" : "Advance Received is blank");
+        alert(reason + ". RM Approval must be answered first.");
+        $("#f_rm_approval").focus();
+        $("#saveMsg").style.color = "var(--red)";
+        $("#saveMsg").textContent = "Blocked: RM Approval required.";
+        return;
+      }
+      if(data.rmApproval === "No"){
+        alert(data.status === "NRF" ? "RM Approval was marked No — NRF bookings require RM sign-off before saving." : "RM Approval was marked No — approvals can't exceed Advance Received without RM sign-off.");
+        $("#saveMsg").style.color = "var(--red)";
+        $("#saveMsg").textContent = "Blocked: RM Approval declined.";
+        return;
+      }
+      if(!data.rmName){
+        alert("RM Name is required once RM Approval is Yes.");
+        $("#f_rm_name").focus();
+        $("#saveMsg").style.color = "var(--red)";
+        $("#saveMsg").textContent = "Blocked: RM Name is required.";
+        return;
+      }
+      if(!data.rmDeadline){
+        alert("Deadline Date after RM Approval is required.");
+        $("#f_rm_deadline").focus();
+        $("#saveMsg").style.color = "var(--red)";
+        $("#saveMsg").textContent = "Blocked: RM deadline date is required.";
+        return;
+      }
+    } else {
+      // Not currently triggered — don't persist stale RM answers from an
+      // earlier, since-reduced approval total.
+      data.rmApproval = "";
+      data.rmName = "";
+      data.rmDeadline = "";
+    }
+
+    if(data.cost > data.sale){
+      alert("Notice: Cost is greater than sale (Booking in loss).");
+    }
+
+    data.approvals = pendingApprovals.slice();
+    const derivedAtSave = derive(data);
+    data.costInr = derivedAtSave.costInr;
+    data.saleInr = derivedAtSave.saleInr;
+    data.approvedAmount = approvalsTotal;
+    data.remainingDue = derivedAtSave.saleInr - (parseFloat(data.advanceInr) || 0);
+
+    let record;
+    let approvalReset = false;
+    const now = new Date();
+    const timestamp = now.toLocaleDateString(undefined, { day:"2-digit", month:"short", year:"numeric" }) +
+                       " " + now.toLocaleTimeString(undefined, { hour:"2-digit", minute:"2-digit" });
+    data.savedAt = timestamp;
+
+    if(editingId){
+      const idx = queries.findIndex(q => q.id === editingId);
+      const before = idx > -1 ? queries[idx] : null;
+      // The form has no field for the Accounts Remark, so carry it over before
+      // diffing — otherwise every edit would falsely log it as removed.
+      if(before) data.accountsRemark = before.accountsRemark || "";
+      const changes = computeDiff(before, data).concat(computeApprovalChanges(before ? before.approvals : [], pendingApprovals));
+      // An edit by anyone other than a moderator/admin reactivates Account
+      // Approval: any earlier approval is voided and the entry is flagged
+      // (the flag shows in the Accounts Remark column), so its row blinks
+      // again and a moderator/admin has to act on it. Moderator/admin edits
+      // leave an existing approval alone — they are the approvers.
+      if(before && changes.length && data.paymentDeadline && session.role !== "admin" && session.role !== "moderator"){
+        const editor = session.displayName || session.username || data.handledBy || "user";
+        const editedOn = now.toLocaleDateString(undefined, { day:"2-digit", month:"short", year:"numeric" });
+        approvalReset = !!before.deadlineApprovedFor;
+        data.deadlineApprovedFor = "";
+        data.accountsRemark = REAPPROVAL_PREFIX + editor + " on " + editedOn + " — re-approval needed";
+        changes.push("Account Approval reactivated — moderator re-approval required");
+      }
+      if(changes.length){
+        pendingEditLog.push({ ts: now.getTime(), timestamp, handledBy: data.handledBy, action: "Updated", changes });
+      }
+      record = before ? Object.assign({}, before, data) : Object.assign({ id: editingId }, data);
+    } else {
+      data.originalCost = data.cost;
+      data.originalSale = data.sale;
+      data.originalDate = data.approvalDate || new Date().toISOString().slice(0,10);
+      const createdChanges = ["Query record created."];
+      pendingApprovals.forEach(a => {
+        createdChanges.push("Approval added: " + fmt(parseFloat(a.amount)||0) + (a.remark ? " (" + a.remark + ")" : "") + " — " + a.date + " " + a.time);
+      });
+      pendingEditLog = [{ ts: now.getTime(), timestamp, handledBy: data.handledBy, action: "Created", changes: createdChanges }];
+      record = Object.assign({ id: uid() }, data);
+    }
+    record.editLog = pendingEditLog.slice();
+
+    setSaveLock(true);
+    try{
+      if(settings.sheetUrl){
+        $("#saveMsg").style.color = "var(--ink-soft)";
+        $("#saveMsg").textContent = "Saving to Google Sheet…";
+        try{
+          await sheetFetch({ action: "upsert", record });
+        }catch(err){
+          $("#saveMsg").style.color = "var(--red)";
+          $("#saveMsg").textContent = "Not saved — Google Sheet error: " + err.message;
+          setSheetStatus("Sync error: " + err.message, "error");
+          return;
+        }
+      }
+
+      const idx2 = queries.findIndex(q => q.id === record.id);
+      if(idx2 > -1){ queries[idx2] = record; } else { queries.push(record); }
+      await persistQueriesLocalOnly();
+      renderAll();
+      renderEditLog();
+    }finally{
+      setSaveLock(false);
+    }
+    $("#saveMsg").style.color = "var(--green)";
+    $("#saveMsg").textContent = editingId ? "Saved — original record updated." : "Query saved.";
+    if(approvalReset){
+      alert("Account Approval was reset because this entry was changed — a moderator or admin must approve it again from Deadline Bookings Data.");
+    }
+    const wasEditing = !!editingId;
+    setTimeout(() => { if($("#saveMsg")) $("#saveMsg").textContent=""; }, 3000);
+    if(!wasEditing){
+      resetForm();
+    } else {
+      editingId = null;
+      $("#cancelEditBtn").style.display = "none";
+    }
+  }
+
+  async function deleteQuery(id){
+    if(!canDelete()){
+      alert("Your account does not have permission to delete entries.");
+      return;
+    }
+    if(!confirm(settings.sheetUrl ? "Move this query to Deleted Entries?" : "Delete this query permanently?")) return;
+    if(settings.sheetUrl){
+      try{
+        await sheetFetch({ action: "delete", id });
+      }catch(err){
+        alert("Could not delete from Google Sheet: " + err.message);
+        return;
+      }
+    }
+    queries = queries.filter(q => q.id !== id);
+    await persistQueriesLocalOnly();
+    renderAll();
+    loadDeletedEntries();
+  }
+
+  function toggleMobileDrawer(open){
+    const spine = $("#spine");
+    const overlay = $("#spineOverlay");
+    if(open){
+      spine.classList.add("open");
+      overlay.classList.add("open");
+    } else {
+      spine.classList.remove("open");
+      overlay.classList.remove("open");
+    }
+  }
+
+  function switchView(view){
+    $$(".spine-tab").forEach(t => t.classList.toggle("active", t.dataset.view === view));
+    $$(".view").forEach(v => v.classList.remove("active"));
+    $("#view-" + view).classList.add("active");
+    if(view === "newquery" && !editingId){ resetForm(); }
+    if(view === "search"){ renderSearch(); }
+    if(view === "mine"){ renderMine(); }
+    if(view === "admin"){ loadUsers(); }
+    if(view === "signups"){ loadPendingSignups(); loadOnboardedUsers(); }
+    toggleMobileDrawer(false);
+  }
+
+  function exportExcel(){
+    const rows = queries.map(q => {
+      const d = derive(q);
+      const approved = (q.approvals || []).reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
+      return {
+        "Query Code": q.code, "Booking Status": q.status, "Payment Status": q.paymentStatus || "", "Doc PP/PAN/Aadhaar Status": q.docStatus || "", "Date Of Approval": q.approvalDate, "Handled By": q.handledBy,
+        "Invoice Date": q.invoiceDate, "Invoice Number": q.invoiceNumber, "Agency Name": q.agency,
+        "Destination": q.destination, "Vendor Name": q.vendor, "Check In Date": q.checkIn, "Check Out Date": q.checkOut,
+        "Service Type": q.serviceType, "Currency Name": q.currency, "Infozeal Cost Center": q.costCenter || "",
+        "Cost (USD/AED)": d.cost, "Sale (USD/AED)": d.sale,
+        "Exchange Rate (INR)": d.rate, "Supplier Payment Approval till date": approved,
+        "Cost (INR)": d.costInr, "Sale (INR)": d.saleInr,
+        "Profit (USD/AED)": d.profit, "Profit (INR)": d.profitInr, "INR Profit %": Number(d.profitPct.toFixed(2)),
+        "Advance Received (INR)": q.advanceInr || 0, "Remaining Payment Due": d.saleInr - (parseFloat(q.advanceInr) || 0),
+        "Payment Deadline Date": q.paymentDeadline || "",
+        "RM Approval": q.rmApproval || "", "RM Name": q.rmName || "", "Deadline Date after RM Approval": q.rmDeadline || "",
+        "Notes": q.notes
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Query Ledger");
+    XLSX.writeFile(wb, "query-ledger-export.xlsx");
+  }
+
+  function registerPwaWorker(){
+    if('serviceWorker' in navigator){
+      const swScript = `
+        const CACHE_NAME = 'query-ledger-pwa-v1';
+        self.addEventListener('install', (e) => { self.skipWaiting(); });
+        self.addEventListener('activate', (e) => { e.waitUntil(self.clients.claim()); });
+        self.addEventListener('fetch', (e) => { e.respondWith(fetch(e.request).catch(() => caches.match(e.request))); });
+      `;
+      const blob = new Blob([swScript], { type: 'text/javascript' });
+      const blobUrl = URL.createObjectURL(blob);
+      navigator.serviceWorker.register(blobUrl).catch(()=>{});
+    }
+  }
+
+  function init(){
+    initSoundAlerts();
+    $("#todayStamp").textContent = "As of " + fmtDate(localDateStr(new Date()));
+
+    $("#mobileMenuBtn").addEventListener("click", () => toggleMobileDrawer(true));
+    $("#spineOverlay").addEventListener("click", () => toggleMobileDrawer(false));
+
+    $$(".spine-tab").forEach(tab => tab.addEventListener("click", () => switchView(tab.dataset.view)));
+    $("#newQueryBtnTop").addEventListener("click", () => { editingId = null; switchView("newquery"); });
+    $("#sampleFillBtn").addEventListener("click", fillSampleRefundableBooking);
+
+    $("#queryForm").addEventListener("submit", handleSubmit);
+    $("#cancelEditBtn").addEventListener("click", () => { editingId = null; resetForm(); });
+    ["f_cost","f_sale","f_rate","f_advance_inr"].forEach(id => $("#"+id).addEventListener("input", updateCalcPreview));
+    $("#f_currency").addEventListener("change", updateCalcPreview);
+    $("#f_currency").addEventListener("input", (e) => { e.target.value = e.target.value.toUpperCase(); });
+    $("#f_currency").addEventListener("change", () => {
+      if(!$("#f_rate").value){ fetchSuggestedRate(true); }
+    });
+    $("#suggestRateBtn").addEventListener("click", () => fetchSuggestedRate(false));
+    $("#f_status").addEventListener("change", updateCalcPreview);
+    $("#f_cost").addEventListener("input", renderApprovalsTable);
+    $("#f_code").addEventListener("input", checkDuplicateLive);
+    $("#addApprovalBtn").addEventListener("click", addApproval);
+    $("#f_rm_approval").addEventListener("change", updateRmApprovalVisibility);
+    $("#f_rm_name").addEventListener("input", updateRmApprovalVisibility);
+
+    $("#dashSearch").addEventListener("input", renderDashboard);
+    $("#dashStatusFilter").addEventListener("change", renderDashboard);
+    $("#searchInput").addEventListener("input", renderSearch);
+    $("#searchStatusFilter").addEventListener("change", renderSearch);
+
+    $("#printBtn").addEventListener("click", () => window.print());
+    $("#exportBtn").addEventListener("click", exportExcel);
+    $("#syncBtn").addEventListener("click", syncFromSheet);
+    $("#sheetConnectBtn").addEventListener("click", connectSheet);
+    $("#loginForm").addEventListener("submit", handleLoginSubmit);
+    $("#signupForm").addEventListener("submit", handleSignupSubmit);
+    $("#showSignupLink").addEventListener("click", (e) => { e.preventDefault(); showSignupFormView(); });
+    $("#showLoginLink").addEventListener("click", (e) => { e.preventDefault(); showLoginFormView(); });
+    $$(".pw-toggle").forEach(btn => btn.addEventListener("click", togglePasswordVisibility));
+    $("#logoutBtn").addEventListener("click", logout);
+    $("#togglePasswordFormBtn").addEventListener("click", toggleChangePasswordForm);
+    $("#changeOwnPasswordForm").addEventListener("submit", handleChangeOwnPasswordSubmit);
+    $("#addUserForm").addEventListener("submit", handleCreateUser);
+    $("#refreshUsersBtn").addEventListener("click", loadUsers);
+    $("#refreshSignupsBtn").addEventListener("click", () => { loadPendingSignups(); loadOnboardedUsers(); });
+    $("#saveAppearanceBtn").addEventListener("click", saveAppearance);
+    $("#resetAppearanceBtn").addEventListener("click", () => {
+      fillAppearanceForm(DEFAULT_APPEARANCE);
+      sharedAppearance = DEFAULT_APPEARANCE;
+      applyEffectiveAppearance();
+    });
+    ["ap_inkNavy","ap_brass","ap_paper","ap_density","ap_cardSize"].forEach(id => {
+      $("#"+id).addEventListener("input", () => applyAppearance(readAppearanceForm()));
+    });
+    $("#resetPersonalThemeBtn").addEventListener("click", async () => {
+      settings.personalTheme = "";
+      await persistSettings();
+      applyEffectiveAppearance();
+    });
+    $("#refreshDeletedBtn").addEventListener("click", loadDeletedEntries);
+
+    $("#myNameInput").addEventListener("change", async (e) => {
+      settings.myName = e.target.value.trim();
+      await persistSettings();
+      renderMine();
+    });
+
+    document.body.addEventListener("click", (e) => {
+      const editId = e.target.getAttribute && e.target.getAttribute("data-edit");
+      const delId = e.target.getAttribute && e.target.getAttribute("data-del");
+      const rmApId = e.target.getAttribute && e.target.getAttribute("data-rmap");
+      const saveProfileFor = e.target.getAttribute && e.target.getAttribute("data-save-profile");
+      const changePassFor = e.target.getAttribute && e.target.getAttribute("data-changepass");
+      const deleteUserFor = e.target.getAttribute && e.target.getAttribute("data-delete-user");
+      const restoreId = e.target.getAttribute && e.target.getAttribute("data-restore");
+      const approveDeadlineId = e.target.getAttribute && e.target.getAttribute("data-account-approval");
+      const approveSignupId = e.target.getAttribute && e.target.getAttribute("data-approve-signup");
+      const rejectSignupId = e.target.getAttribute && e.target.getAttribute("data-reject-signup");
+
+      if(editId){
+        const q = queries.find(q => q.id === editId);
+        if(q) loadIntoForm(q);
+      }
+      if(delId){
+        deleteQuery(delId);
+      }
+      if(rmApId){
+        removeApproval(rmApId);
+      }
+      if(saveProfileFor){
+        saveUserProfile(saveProfileFor, e.target);
+      }
+      if(changePassFor){
+        changeUserPasswordFlow(changePassFor, e.target);
+      }
+      if(deleteUserFor){
+        deleteUserFlow(deleteUserFor);
+      }
+      if(restoreId){
+        restoreEntryFlow(restoreId, e.target);
+      }
+      if(approveDeadlineId){
+        accountApproveDeadline(approveDeadlineId, e.target);
+      }
+      if(approveSignupId){
+        approveSignupFlow(approveSignupId, e.target);
+      }
+      if(rejectSignupId){
+        rejectSignupFlow(rejectSignupId, e.target);
+      }
+    });
+
+    resetForm();
+    registerPwaWorker();
+  }
+
+  (async function boot(){
+    await loadAll();
+    init();
+    const ok = await establishConnection();
+    if(ok){
+      renderAll();
+      checkPaymentDeadlines();
+    }
+  })();
+})();
+</script>
+</body>
+</html>
