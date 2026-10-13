@@ -233,6 +233,9 @@
   .section-label:not(:first-child){margin-top:24px;}
 
   .table-wrap{overflow-x:auto; border:1px solid var(--line-soft); border-radius:8px; background:#fff;}
+  /* Long tables scroll inside a fixed-height box (header row stays visible) so the page itself stays short. */
+  .scroll-box{max-height:min(60vh, 440px); overflow:auto;}
+  .scroll-box thead th{position:sticky; top:0; z-index:2; box-shadow:0 1px 0 var(--line);}
   table{width:100%; border-collapse:collapse; font-size:13px; min-width:1100px;}
   thead th{
     text-align:left; font-size:10.5px; letter-spacing:0.07em; text-transform:uppercase; color:var(--ink-soft);
@@ -388,6 +391,62 @@
     .topbar h1{font-size:18px;}
   }
   :focus-visible{outline:2px solid var(--brass); outline-offset:2px;}
+
+  /* ---------- Motion & polish ---------- */
+  html{scroll-behavior:smooth;}
+  @keyframes fadeIn{from{opacity:0;} to{opacity:1;}}
+  @keyframes popIn{from{opacity:0; transform:scale(.94);} to{opacity:1; transform:none;}}
+  @keyframes slideDown{from{opacity:0; transform:translateY(-6px);} to{opacity:1; transform:none;}}
+  @keyframes fadeSlideIn{from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:none;}}
+  @keyframes badgePulse{0%,100%{box-shadow:0 0 0 0 rgba(179,56,44,.5);} 50%{box-shadow:0 0 0 6px rgba(179,56,44,0);}}
+
+  /* Theme changes (admin or personal) glide instead of snapping. */
+  body, .spine, .main, .panel, .stat-card, .flag-pill, .login-card, .table-wrap, thead th, .mobile-bar,
+  .btn, .icon-btn, .sheet-btn, .field input, .field select, .field textarea{
+    transition:background-color .35s ease, border-color .25s ease, color .25s ease, box-shadow .2s ease, transform .15s ease;
+  }
+
+  /* Views and panels ease in, one after another. */
+  .topbar{animation:fadeSlideIn .3s ease backwards;}
+  .panel{animation:panelFadeIn .3s cubic-bezier(.2,.8,.2,1) backwards;}
+  .panel + .panel{animation-delay:.07s;}
+  .panel + .panel + .panel{animation-delay:.14s;}
+  .empty-state{animation:fadeIn .3s ease;}
+
+  /* Buttons respond to hover and press. */
+  .btn:active, .icon-btn:active, .sheet-btn:active{transform:scale(.97);}
+  .icon-btn:not(:disabled):hover{border-color:var(--brass); color:var(--ink); box-shadow:0 2px 6px -2px rgba(19,32,57,.25); transform:translateY(-1px);}
+  .icon-btn:disabled{cursor:not-allowed; opacity:.6;}
+  .flag-pill:hover{transform:translateY(-1px); box-shadow:var(--shadow);}
+
+  /* Sidebar. */
+  .spine-tab{transition:background-color .2s ease, color .2s ease, padding-left .2s ease, border-color .2s ease;}
+  .spine-tab:hover{padding-left:18px;}
+  .spine-tab .ic{transition:transform .2s ease;}
+  .spine-tab:hover .ic{transform:scale(1.15);}
+  .pending-badge{animation:badgePulse 1.8s ease-out infinite;}
+  .spine-overlay.open{animation:fadeIn .2s ease;}
+
+  /* Table rows. */
+  tbody tr{transition:background-color .15s ease;}
+
+  /* Form fields get a soft glow when focused. */
+  .field input:focus, .field select:focus, .field textarea:focus{box-shadow:0 0 0 3px color-mix(in srgb, var(--brass) 22%, transparent);}
+
+  /* Things that appear on their own slide in. */
+  .login-card{animation:popIn .3s cubic-bezier(.2,.8,.2,1);}
+  .warn-box.show, .login-error.show, #rmApprovalBox{animation:slideDown .25s ease;}
+  .save-lock{animation:fadeIn .15s ease;}
+  .save-lock-box{animation:popIn .2s ease;}
+
+  /* Anyone who asks their device for less motion gets none — except the deadline
+     blink and the save spinner, which are alerts rather than decoration. */
+  @media (prefers-reduced-motion: reduce){
+    *, *::before, *::after{animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.01ms !important; scroll-behavior:auto !important;}
+    tbody tr.deadline-blink{animation:deadline-blink 1s step-start infinite !important;}
+    tbody tr.deadline-blink-dark{animation:deadline-blink-dark .7s step-start infinite !important;}
+    .save-spinner{animation:saveSpin .8s linear infinite !important;}
+  }
 </style>
 </head>
 <body>
@@ -549,7 +608,7 @@
             <option value="HOLDING">HOLDING</option>
           </select>
         </div>
-        <div class="table-wrap">
+        <div class="table-wrap scroll-box">
           <table id="dashTable">
             <thead>
               <tr>
@@ -576,7 +635,7 @@
             <div class="desc">Bookings due today, tomorrow, in 2 days — or already overdue. Overdue entries flash dark red until Account Approval is given.</div>
           </div>
         </div>
-        <div class="table-wrap">
+        <div class="table-wrap scroll-box">
           <table id="deadlineTable">
             <thead>
               <tr>
@@ -657,15 +716,18 @@
             </div>
             <div class="field">
               <label>Agency Name *</label>
-              <input type="text" id="f_agency" required placeholder="Agency name">
+              <input type="text" id="f_agency" required placeholder="Agency name" list="agencySuggestions" autocomplete="off">
+              <datalist id="agencySuggestions"></datalist>
             </div>
             <div class="field">
               <label>Destination *</label>
-              <input type="text" id="f_destination" required placeholder="e.g. DXB">
+              <input type="text" id="f_destination" required placeholder="e.g. DXB" list="destinationSuggestions" autocomplete="off">
+              <datalist id="destinationSuggestions"></datalist>
             </div>
             <div class="field">
               <label>Vendor Name *</label>
-              <input type="text" id="f_vendor" required placeholder="Vendor name">
+              <input type="text" id="f_vendor" required placeholder="Vendor name" list="vendorSuggestions" autocomplete="off">
+              <datalist id="vendorSuggestions"></datalist>
             </div>
             <div class="field">
               <label>Check In Date *</label>
@@ -2497,7 +2559,41 @@
     $("#mineEmptyMsg").textContent = "No entries under your name yet.";
   }
 
+  // Type-ahead suggestions for Agency, Destination, Vendor and Cost Center,
+  // built from past entries (most-used first). Only entries the signed-in
+  // person can see feed it, so restricted users never get hints drawn from
+  // other people's bookings. Cost Center keeps its standard codes too.
+  const COST_CENTER_DEFAULTS = ["RAJ","BLR","AMD","GGN","MUM","MAA","COK"];
+
+  function suggestionsFor(key, extras){
+    const seen = new Map();   // lowercase -> { label, count }
+    visibleQueries().forEach(q => {
+      const v = String(q[key] || "").trim();
+      if(!v) return;
+      const k = v.toLowerCase();
+      const hit = seen.get(k);
+      if(hit) hit.count++; else seen.set(k, { label: v, count: 1 });
+    });
+    (extras || []).forEach(v => { if(!seen.has(v.toLowerCase())) seen.set(v.toLowerCase(), { label: v, count: 0 }); });
+    return Array.from(seen.values())
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+      .map(e => e.label);
+  }
+
+  function fillDatalist(id, values){
+    const el = document.getElementById(id);
+    if(el) el.innerHTML = values.map(v => `<option value="${esc(v)}"></option>`).join("");
+  }
+
+  function refreshSuggestions(){
+    fillDatalist("agencySuggestions", suggestionsFor("agency"));
+    fillDatalist("destinationSuggestions", suggestionsFor("destination"));
+    fillDatalist("vendorSuggestions", suggestionsFor("vendor"));
+    fillDatalist("costCenterSuggestions", suggestionsFor("costCenter", COST_CENTER_DEFAULTS));
+  }
+
   function renderAll(){
+    refreshSuggestions();
     renderDashboard();
     renderDeadlineBookings();
     renderSearch();
