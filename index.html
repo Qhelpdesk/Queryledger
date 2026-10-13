@@ -486,6 +486,31 @@
     .dm-buttons .btn{flex:1;}
   }
 
+
+  /* ---------- Signup cooldown clock ---------- */
+  .signup-cooldown{
+    position:fixed; inset:0; z-index:1800; display:flex; align-items:center; justify-content:center; padding:20px;
+    background:radial-gradient(circle at 50% 35%, var(--ink-navy-2) 0%, var(--ink-navy) 72%); color:#F3EAD2;
+    animation:fadeIn .25s ease;
+  }
+  .signup-cooldown[hidden]{display:none;}
+  .cooldown-card{text-align:center; width:100%; max-width:440px; animation:popIn .35s cubic-bezier(.2,.8,.2,1);}
+  .cooldown-clock{position:relative; width:min(74vw, 300px); aspect-ratio:1; margin:0 auto 26px;}
+  .cooldown-clock svg{width:100%; height:100%; overflow:visible;}
+  .cd-track{fill:none; stroke:rgba(243,234,210,.12); stroke-width:6;}
+  .cd-fill{fill:none; stroke:var(--brass); stroke-width:6; stroke-linecap:round; filter:drop-shadow(0 0 7px color-mix(in srgb, var(--brass) 75%, transparent));}
+  .cd-dot{fill:#fff; transform-origin:100px 100px; filter:drop-shadow(0 0 7px var(--brass));}
+  .cd-tick{stroke:rgba(243,234,210,.3); stroke-width:1.2;}
+  .cd-tick.major{stroke:rgba(243,234,210,.7); stroke-width:2;}
+  .cooldown-time{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-family:'IBM Plex Mono',monospace; font-size:clamp(40px, 12vw, 58px); font-weight:500; letter-spacing:.04em;
+    text-shadow:0 0 18px rgba(255,255,255,.2);
+  }
+  .cooldown-card h2{margin:0 0 8px; font-family:'Fraunces',serif; font-size:28px;}
+  .cooldown-card p{margin:0 0 14px; font-size:14.5px; line-height:1.5; color:#D8D2C2;}
+  .cooldown-note{font-size:12.5px; color:#9AA6BC;}
+
   /* Anyone who asks their device for less motion gets none — except the deadline
      blink and the save spinner, which are alerts rather than decoration. */
   @media (prefers-reduced-motion: reduce){
@@ -504,6 +529,23 @@
 </div>
 
 <div class="spine-overlay" id="spineOverlay"></div>
+
+<div class="signup-cooldown" id="signupCooldown" hidden role="alertdialog" aria-live="polite" aria-labelledby="signupCooldownTitle">
+  <div class="cooldown-card">
+    <div class="cooldown-clock">
+      <svg viewBox="0 0 200 200" aria-hidden="true">
+        <g id="cooldownTicks"></g>
+        <circle class="cd-track" cx="100" cy="100" r="86"/>
+        <circle class="cd-fill" id="cooldownRingFill" cx="100" cy="100" r="86" transform="rotate(-90 100 100)"/>
+        <circle class="cd-dot" id="cooldownDot" cx="100" cy="14" r="6"/>
+      </svg>
+      <div class="cooldown-time" id="cooldownTime">01:00</div>
+    </div>
+    <h2 id="signupCooldownTitle">Request sent</h2>
+    <p id="signupCooldownMsg"></p>
+    <div class="cooldown-note">Please wait. You can't submit another signup request until the clock runs out.</div>
+  </div>
+</div>
 
 <div class="deadline-modal" id="deadlineModal" hidden role="dialog" aria-modal="true" aria-labelledby="deadlineModalTitle">
   <div class="deadline-modal-card">
@@ -1448,8 +1490,80 @@
     }
   }
 
+  // After a signup request is sent, a full-page one-minute clock blocks the
+  // screen so the same request can't be fired off again. The end time is kept
+  // in localStorage, so reloading the page doesn't skip the wait.
+  const SIGNUP_COOLDOWN_MS = 60000;
+  const SIGNUP_COOLDOWN_KEY = "signupCooldownUntil";
+  const SIGNUP_COOLDOWN_MSG_KEY = "signupCooldownMsg";
+  const SIGNUP_RING_LENGTH = 2 * Math.PI * 86;
+  let signupCooldownUntilMem = 0;
+  let signupCooldownTimer = null;
+
+  function signupCooldownRemaining(){
+    let until = signupCooldownUntilMem;
+    try{ until = Math.max(until, parseInt(localStorage.getItem(SIGNUP_COOLDOWN_KEY) || "0", 10) || 0); }catch(e){}
+    return Math.max(0, until - Date.now());
+  }
+
+  function startSignupCooldown(message){
+    signupCooldownUntilMem = Date.now() + SIGNUP_COOLDOWN_MS;
+    try{
+      localStorage.setItem(SIGNUP_COOLDOWN_KEY, String(signupCooldownUntilMem));
+      localStorage.setItem(SIGNUP_COOLDOWN_MSG_KEY, message || "");
+    }catch(e){}
+    showSignupCooldown(message);
+  }
+
+  function showSignupCooldown(message){
+    if(signupCooldownRemaining() <= 0) return;
+    let msg = message;
+    if(!msg){ try{ msg = localStorage.getItem(SIGNUP_COOLDOWN_MSG_KEY); }catch(e){} }
+    $("#signupCooldownMsg").textContent = msg || "An admin or moderator needs to approve it before you can log in.";
+
+    if(!$("#cooldownTicks").firstChild){
+      let ticks = "";
+      for(let i = 0; i < 60; i++){
+        const major = i % 5 === 0;
+        ticks += `<line class="cd-tick${major ? " major" : ""}" x1="100" y1="${major ? 1 : 3}" x2="100" y2="8" transform="rotate(${i * 6} 100 100)"/>`;
+      }
+      $("#cooldownTicks").innerHTML = ticks;
+    }
+    const ring = $("#cooldownRingFill");
+    ring.style.strokeDasharray = SIGNUP_RING_LENGTH;
+    $("#signupCooldown").hidden = false;
+    playBuzzer("info");
+
+    clearInterval(signupCooldownTimer);
+    const tick = () => {
+      const left = signupCooldownRemaining();
+      const secs = Math.ceil(left / 1000);
+      $("#cooldownTime").textContent = String(Math.floor(secs / 60)).padStart(2, "0") + ":" + String(secs % 60).padStart(2, "0");
+      const fraction = left / SIGNUP_COOLDOWN_MS;
+      ring.style.strokeDashoffset = SIGNUP_RING_LENGTH * (1 - fraction);
+      $("#cooldownDot").style.transform = "rotate(" + (fraction * 360) + "deg)";
+      if(left <= 0){ clearInterval(signupCooldownTimer); endSignupCooldown(); }
+    };
+    tick();
+    signupCooldownTimer = setInterval(tick, 200);
+  }
+
+  function endSignupCooldown(){
+    $("#signupCooldown").hidden = true;
+    let msg = "";
+    try{
+      msg = localStorage.getItem(SIGNUP_COOLDOWN_MSG_KEY) || "";
+      localStorage.removeItem(SIGNUP_COOLDOWN_KEY);
+      localStorage.removeItem(SIGNUP_COOLDOWN_MSG_KEY);
+    }catch(e){}
+    signupCooldownUntilMem = 0;
+    showLoginFormView();
+    showLoginGate(msg || "Request submitted — an admin or moderator needs to approve it before you can log in.", "info");
+  }
+
   async function handleSignupSubmit(e){
     e.preventDefault();
+    if(signupCooldownRemaining() > 0){ showSignupCooldown(); return; }
     const username = $("#signup_username").value.trim();
     const password = $("#signup_password").value;
     if(!username || !password){
@@ -1477,10 +1591,9 @@
 
       $("#signup_username").value = "";
       $("#signup_password").value = "";
-      showLoginFormView();
-      showLoginGate(json.duplicate
-        ? "Request submitted — that name already has an account, so an admin/moderator will need to confirm it's you before you can log in."
-        : "Request submitted — an admin or moderator needs to approve it before you can log in.", "info");
+      startSignupCooldown(json.duplicate
+        ? "That name already has an account, so an admin or moderator will need to confirm it's you before you can log in."
+        : "An admin or moderator needs to approve your request before you can log in.");
     }catch(err){
       $("#signupError").textContent = err.message;
       $("#signupError").classList.add("show");
@@ -3401,6 +3514,7 @@
 
   function init(){
     initSoundAlerts();
+    if(!session.token && signupCooldownRemaining() > 0) showSignupCooldown();
     $("#deadlineAckCheck").addEventListener("change", (e) => {
       $("#deadlineModalAckBtn").disabled = !e.target.checked;
       $("#deadlineModalGoBtn").disabled = !e.target.checked;
