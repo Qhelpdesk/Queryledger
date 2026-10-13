@@ -439,6 +439,53 @@
   .save-lock{animation:fadeIn .15s ease;}
   .save-lock-box{animation:popIn .2s ease;}
 
+
+  /* ---------- Login deadline reminder popup ---------- */
+  .deadline-modal{
+    position:fixed; inset:0; z-index:1500; display:flex; background:var(--paper-card); animation:fadeIn .2s ease;
+  }
+  .deadline-modal[hidden]{display:none;}
+  .deadline-modal-card{
+    width:100%; height:100%; display:flex; flex-direction:column; overflow:hidden;
+    background:var(--paper-card); border-top:6px solid #7A1414; animation:popIn .28s cubic-bezier(.2,.8,.2,1);
+    padding-top:env(safe-area-inset-top, 0px); padding-bottom:env(safe-area-inset-bottom, 0px);
+  }
+  .deadline-modal-head{display:flex; align-items:center; gap:16px; padding:22px max(24px, 4vw) 14px;}
+  .deadline-modal-head h2{margin:0; font-family:'Fraunces',serif; font-size:26px; color:var(--ink);}
+  .dm-sub{font-size:14px; color:var(--ink-soft); margin-top:3px;}
+  .dm-scope{font-size:12.5px; font-weight:600; color:var(--brass); margin-top:4px;}
+  .dm-icon{
+    width:52px; height:52px; flex:none; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:26px; background:#F5DFDB; color:#7A1414;
+  }
+  .dm-body{flex:1; overflow:auto; padding:0 max(24px, 4vw); min-height:0;}
+  .dm-table{min-width:0; width:100%;}
+  .dm-table thead th{position:sticky; top:0; z-index:1; box-shadow:0 1px 0 var(--line);}
+  .dm-table td{padding:10px 12px;}
+  .dm-row.passed td{background:#FBEDEA;}
+  .dm-badge{display:inline-block; padding:3px 9px; border-radius:999px; font-size:11.5px; font-weight:700; white-space:nowrap;}
+  .dm-badge.passed{background:#7A1414; color:#fff; animation:dmPulse 1.2s ease-in-out infinite;}
+  .dm-badge.today{background:var(--red); color:#fff;}
+  .dm-badge.tomorrow{background:var(--amber); color:#fff;}
+  .dm-badge.soon{background:var(--amber-soft); color:#7A5314;}
+  @keyframes dmPulse{0%,100%{opacity:1;} 50%{opacity:.55;}}
+  .dm-actions{
+    display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
+    padding:14px max(24px, 4vw) 18px; border-top:1px solid var(--line-soft); background:var(--paper);
+  }
+  .dm-check{display:flex; align-items:center; gap:10px; font-size:13.5px; font-weight:600; color:var(--ink); cursor:pointer; flex:1 1 280px;}
+  .dm-check input{width:20px; height:20px; accent-color:var(--brass); cursor:pointer; flex:none;}
+  .dm-buttons{display:flex; gap:10px; flex-wrap:wrap;}
+  @media (max-width:560px){
+    .deadline-modal-head{padding:16px 14px 10px; gap:12px;}
+    .deadline-modal-head h2{font-size:20px;}
+    .dm-icon{width:40px; height:40px; font-size:20px;}
+    .dm-body{padding:0 8px;}
+    .dm-actions{padding:12px 14px 16px;}
+    .dm-buttons{width:100%;}
+    .dm-buttons .btn{flex:1;}
+  }
+
   /* Anyone who asks their device for less motion gets none — except the deadline
      blink and the save spinner, which are alerts rather than decoration. */
   @media (prefers-reduced-motion: reduce){
@@ -457,6 +504,32 @@
 </div>
 
 <div class="spine-overlay" id="spineOverlay"></div>
+
+<div class="deadline-modal" id="deadlineModal" hidden role="dialog" aria-modal="true" aria-labelledby="deadlineModalTitle">
+  <div class="deadline-modal-card">
+    <div class="deadline-modal-head">
+      <div class="dm-icon" aria-hidden="true">&#9201;</div>
+      <div>
+        <h2 id="deadlineModalTitle">Payment Deadline Reminder</h2>
+        <div class="dm-sub" id="deadlineModalSub"></div>
+        <div class="dm-scope" id="deadlineModalScope"></div>
+      </div>
+    </div>
+    <div class="dm-body">
+      <table class="dm-table">
+        <thead><tr><th>Status</th><th>Query Code</th><th>Agency</th><th>Handled By</th><th>Payment Deadline</th></tr></thead>
+        <tbody id="deadlineModalBody"></tbody>
+      </table>
+    </div>
+    <div class="dm-actions">
+      <label class="dm-check"><input type="checkbox" id="deadlineAckCheck"> I have reviewed the payment deadlines for these bookings.</label>
+      <div class="dm-buttons">
+        <button type="button" class="btn ghost" id="deadlineModalAckBtn" disabled>Acknowledge</button>
+        <button type="button" class="btn primary" id="deadlineModalGoBtn" disabled>Acknowledge &amp; View Deadline Bookings</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div class="save-lock" id="saveLock" hidden>
   <div class="save-lock-box"><span class="save-spinner"></span><span>Saving your entry… please wait</span></div>
@@ -2192,27 +2265,98 @@
   // Alerts on sign-in for anything deadline-related that nobody has
   // acknowledged yet: passed, due today, tomorrow, or in 2 days. Entries
   // already given Account Approval for their current deadline are left out.
-  function checkPaymentDeadlines(){
+  // On sign-in, a styled popup lists every deadline nobody has acknowledged
+  // yet: passed, due today, tomorrow, or in 2 days. Entries that already have
+  // Account Approval for their current deadline are left out, and each person
+  // only sees the entries they can see.
+  function collectDeadlineReminders(){
     const today = localDateStr(new Date());
-    const groups = { passed: [], today: [], tomorrow: [], two: [] };
+    const rank = { passed: 0, today: 1, tomorrow: 2, soon: 3 };
+    const rows = [];
     visibleQueries().forEach(q => {
       const dl = cleanDateStr(q.paymentDeadline);
       if(!dl) return;
       if(cleanDateStr(q.deadlineApprovedFor) === dl) return;
       const diff = Math.round((new Date(dl) - new Date(today)) / 86400000);
-      if(diff < 0) groups.passed.push(q.code);
-      else if(diff === 0) groups.today.push(q.code);
-      else if(diff === 1) groups.tomorrow.push(q.code);
-      else if(diff === 2) groups.two.push(q.code);
+      let kind, label;
+      if(diff < 0){ kind = "passed"; label = "Deadline passed" + (diff === -1 ? " (yesterday)" : " (" + (-diff) + " days ago)"); }
+      else if(diff === 0){ kind = "today"; label = "Payment due today"; }
+      else if(diff === 1){ kind = "tomorrow"; label = "Payment due tomorrow"; }
+      else if(diff === 2){ kind = "soon"; label = "Payment due in 2 days"; }
+      else return;
+      rows.push({ kind, label, code: q.code, agency: q.agency, handledBy: q.handledBy, deadline: dl });
     });
-    const lines = [];
-    if(groups.passed.length)   lines.push("DEADLINE PASSED: " + groups.passed.join(", "));
-    if(groups.today.length)    lines.push("Payment due today: " + groups.today.join(", "));
-    if(groups.tomorrow.length) lines.push("Payment due tomorrow: " + groups.tomorrow.join(", "));
-    if(groups.two.length)      lines.push("Payment due in 2 days: " + groups.two.join(", "));
-    if(lines.length){
-      alert("⏰ PAYMENT DEADLINE ALERT\n\n" + lines.join("\n") + "\n\nSee Deadline Bookings Data on the Dashboard.");
+    rows.sort((a, b) => rank[a.kind] - rank[b.kind] || a.deadline.localeCompare(b.deadline) || String(a.code).localeCompare(String(b.code)));
+    return rows;
+  }
+
+  function showDeadlineModal(rows){
+    const counts = { passed: 0, today: 0, tomorrow: 0, soon: 0 };
+    rows.forEach(r => counts[r.kind]++);
+    const parts = [];
+    if(counts.passed)   parts.push(counts.passed + " passed");
+    if(counts.today)    parts.push(counts.today + " due today");
+    if(counts.tomorrow) parts.push(counts.tomorrow + " due tomorrow");
+    if(counts.soon)     parts.push(counts.soon + " due in 2 days");
+    $("#deadlineModalSub").textContent = rows.length + (rows.length === 1 ? " entry needs" : " entries need") + " attention — " + parts.join(" · ");
+    $("#deadlineModalBody").innerHTML = rows.map(r => `
+      <tr class="dm-row ${r.kind}">
+        <td><span class="dm-badge ${r.kind}">${esc(r.label)}</span></td>
+        <td><strong>${esc(r.code)}</strong></td>
+        <td>${esc(r.agency) || "—"}</td>
+        <td>${esc(r.handledBy) || "—"}</td>
+        <td>${esc(fmtDate(r.deadline))}</td>
+      </tr>`).join("");
+    const seeAll = session.role === "admin" || session.role === "moderator";
+    $("#deadlineModalScope").textContent = seeAll
+      ? "Showing all users' bookings — you can see everything as " + session.role + "."
+      : "Showing your own bookings (Handled By " + (session.displayName || session.username) + ").";
+    $("#deadlineAckCheck").checked = false;
+    $("#deadlineModalAckBtn").disabled = true;
+    $("#deadlineModalGoBtn").disabled = true;
+    $("#deadlineModal").hidden = false;
+    document.querySelectorAll(".shell, .mobile-bar").forEach(el => el.setAttribute("inert", ""));
+    playBuzzer("deadline");
+    $("#deadlineAckCheck").focus();
+  }
+
+  function closeDeadlineModal(){
+    $("#deadlineModal").hidden = true;
+    if(!saveInFlight) document.querySelectorAll(".shell, .mobile-bar").forEach(el => el.removeAttribute("inert"));
+  }
+
+  // The reminder can't be dismissed: each person has to tick the box and
+  // acknowledge it, for the bookings they can see. The acknowledgement is
+  // remembered for this sign-in (so a page reload doesn't nag again) and logged
+  // to the Sheet, where admins and moderators can see who acknowledged what.
+  let pendingDeadlineRows = [];
+
+  function deadlineAckKey(){ return "deadlineAck:" + (session.token || "local"); }
+  function deadlineSignature(rows){ return rows.map(r => r.code + "|" + r.deadline + "|" + r.kind).join(","); }
+
+  async function acknowledgeDeadlines(thenViewBookings){
+    const rows = pendingDeadlineRows;
+    try{ sessionStorage.setItem(deadlineAckKey(), deadlineSignature(rows)); }catch(e){}
+    closeDeadlineModal();
+    if(settings.sheetUrl && session.token){
+      // Best-effort audit log — never blocks the person if the backend is older or offline.
+      sheetFetch({ action: "ackDeadlines", entries: rows.map(r => r.code) }).catch(() => {});
     }
+    if(thenViewBookings){
+      switchView("dashboard");
+      setTimeout(() => {
+        const panel = document.getElementById("deadlineTable").closest(".panel");
+        if(panel) panel.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 80);
+    }
+  }
+
+  function checkPaymentDeadlines(){
+    const rows = collectDeadlineReminders();
+    if(!rows.length) return;
+    try{ if(sessionStorage.getItem(deadlineAckKey()) === deadlineSignature(rows)) return; }catch(e){}
+    pendingDeadlineRows = rows;
+    showDeadlineModal(rows);
   }
 
   async function loadAll(){
@@ -3257,6 +3401,12 @@
 
   function init(){
     initSoundAlerts();
+    $("#deadlineAckCheck").addEventListener("change", (e) => {
+      $("#deadlineModalAckBtn").disabled = !e.target.checked;
+      $("#deadlineModalGoBtn").disabled = !e.target.checked;
+    });
+    $("#deadlineModalAckBtn").addEventListener("click", () => acknowledgeDeadlines(false));
+    $("#deadlineModalGoBtn").addEventListener("click", () => acknowledgeDeadlines(true));
     $("#todayStamp").textContent = "As of " + fmtDate(localDateStr(new Date()));
 
     $("#mobileMenuBtn").addEventListener("click", () => toggleMobileDrawer(true));
