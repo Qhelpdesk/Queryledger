@@ -511,6 +511,51 @@
   .cooldown-card p{margin:0 0 14px; font-size:14.5px; line-height:1.5; color:#D8D2C2;}
   .cooldown-note{font-size:12.5px; color:#9AA6BC;}
 
+
+  /* ---------- Notification toast ---------- */
+  .app-toast{
+    position:fixed; top:max(14px, env(safe-area-inset-top, 0px)); left:50%; transform:translateX(-50%); z-index:1900;
+    width:min(94vw, 560px); display:flex; align-items:center; gap:14px; padding:14px 16px;
+    background:var(--paper-card); border-radius:14px; border-left:6px solid var(--green);
+    box-shadow:0 18px 44px -10px rgba(0,0,0,.5); animation:toastIn .35s cubic-bezier(.2,.8,.2,1);
+  }
+  .app-toast[hidden]{display:none;}
+  .app-toast.bad{border-left-color:var(--red);}
+  .toast-icon{
+    width:40px; height:40px; flex:none; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:20px; font-weight:700; background:var(--green-soft); color:var(--green);
+  }
+  .app-toast.bad .toast-icon{background:var(--red-soft); color:var(--red);}
+  .toast-text{flex:1; min-width:0;}
+  .toast-title{font-family:'Fraunces',serif; font-weight:700; font-size:16px; color:var(--ink);}
+  .toast-msg{font-size:13px; color:var(--ink-soft); margin-top:2px; line-height:1.4;}
+  .toast-actions{display:flex; align-items:center; gap:6px; flex:none;}
+  .toast-close{border:none; background:transparent; font-size:24px; line-height:1; color:var(--ink-soft); cursor:pointer; padding:2px 6px; border-radius:6px;}
+  .toast-close:hover{background:var(--line-soft);}
+  @keyframes toastIn{from{opacity:0; transform:translate(-50%,-16px);} to{opacity:1; transform:translate(-50%,0);}}
+  @media (max-width:480px){
+    .app-toast{flex-wrap:wrap;}
+    .toast-actions{width:100%; justify-content:space-between;}
+  }
+
+
+  /* ---------- Access removed (account deleted while signed in) ---------- */
+  .access-removed{
+    position:fixed; inset:0; z-index:2100; display:flex; align-items:center; justify-content:center; padding:24px;
+    background:linear-gradient(160deg, #5A1010 0%, #1B0606 100%); color:#fff; animation:fadeIn .15s ease;
+  }
+  .access-removed[hidden]{display:none;}
+  .access-card{text-align:center; max-width:460px; width:100%; animation:popIn .3s cubic-bezier(.2,.8,.2,1);}
+  .access-icon{
+    width:110px; height:110px; margin:0 auto 24px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:54px; font-weight:700; background:rgba(255,255,255,.1); border:3px solid #FF8A7A; color:#FF8A7A;
+    animation:accessPulse 1.4s ease-out infinite;
+  }
+  @keyframes accessPulse{0%{box-shadow:0 0 0 0 rgba(255,138,122,.55);} 100%{box-shadow:0 0 0 26px rgba(255,138,122,0);}}
+  .access-card h2{margin:0 0 10px; font-family:'Fraunces',serif; font-size:34px;}
+  .access-card p{margin:0 0 18px; font-size:16px; line-height:1.55; color:#F2D4CF;}
+  .access-count{font-size:13px; color:#E7B7AF; margin-bottom:18px;}
+
   /* Anyone who asks their device for less motion gets none — except the deadline
      blink and the save spinner, which are alerts rather than decoration. */
   @media (prefers-reduced-motion: reduce){
@@ -529,6 +574,28 @@
 </div>
 
 <div class="spine-overlay" id="spineOverlay"></div>
+
+<div class="access-removed" id="accessRemoved" hidden role="alertdialog" aria-live="assertive" aria-labelledby="accessRemovedTitle">
+  <div class="access-card">
+    <div class="access-icon" aria-hidden="true">&#10005;</div>
+    <h2 id="accessRemovedTitle">No access</h2>
+    <p>Your account has been deleted by an administrator. You can no longer view the ledger or make entries.</p>
+    <div class="access-count">Taking you to Create Account in <b id="accessRemovedSecs">8</b> s</div>
+    <button type="button" class="btn brass" id="accessRemovedBtn">Go to Create Account now</button>
+  </div>
+</div>
+
+<div class="app-toast" id="appToast" hidden role="status" aria-live="assertive">
+  <div class="toast-icon" id="appToastIcon" aria-hidden="true">&#10003;</div>
+  <div class="toast-text">
+    <div class="toast-title" id="appToastTitle"></div>
+    <div class="toast-msg" id="appToastMsg"></div>
+  </div>
+  <div class="toast-actions">
+    <button type="button" class="btn primary small" id="appToastAction">Log in now</button>
+    <button type="button" class="toast-close" id="appToastClose" aria-label="Dismiss">&times;</button>
+  </div>
+</div>
 
 <div class="signup-cooldown" id="signupCooldown" hidden role="alertdialog" aria-live="polite" aria-labelledby="signupCooldownTitle">
   <div class="cooldown-card">
@@ -1412,6 +1479,79 @@
     el.className = "sheet-status" + (cls ? " " + cls : "");
   }
 
+  // ---------- Account deleted while signed in ----------
+  // The backend checks the Users sheet on every request, so a deleted account
+  // is refused immediately. To make the person find out right away (not only
+  // the next time they click something), every signed-in browser also pings
+  // the backend every few seconds. When the account is gone they get a
+  // full-screen "No access" notice and are then dropped on Create Account.
+  const SESSION_WATCH_MS = 6000;
+  let sessionWatchTimer = null;
+  let sessionPingInFlight = false;
+  let accessRemovedShown = false;
+  let accessRemovedTimer = null;
+
+  function notifyIfAccessRemoved(message){
+    if(/account no longer exists/i.test(String(message || ""))) handleAccessRemoved();
+  }
+
+  async function pingSession(){
+    if(!session.token || !settings.sheetUrl || sessionPingInFlight || accessRemovedShown) return;
+    sessionPingInFlight = true;
+    try{
+      await sheetFetch({ action: "ping" });      // a removed account is caught inside sheetFetch
+    }catch(err){ /* offline, or an older backend without "ping" — try again next tick */ }
+    finally{ sessionPingInFlight = false; }
+  }
+
+  function stopSessionWatch(){ if(sessionWatchTimer){ clearInterval(sessionWatchTimer); sessionWatchTimer = null; } }
+  function startSessionWatch(){
+    stopSessionWatch();
+    if(!settings.sheetUrl || !session.token) return;
+    sessionWatchTimer = setInterval(pingSession, SESSION_WATCH_MS);
+  }
+
+  async function handleAccessRemoved(){
+    if(accessRemovedShown || !session.token) return;
+    accessRemovedShown = true;
+
+    // 1. Tell them straight away: full screen, with a warning sound.
+    let secs = 8;
+    $("#accessRemovedSecs").textContent = secs;
+    $("#accessRemoved").hidden = false;
+    playBuzzer("warning");
+    clearInterval(accessRemovedTimer);
+    accessRemovedTimer = setInterval(() => {
+      secs--;
+      $("#accessRemovedSecs").textContent = Math.max(secs, 0);
+      if(secs <= 0) leaveAccessRemoved();
+    }, 1000);
+
+    // 2. Shut everything else down: timers, locks, popups, and the saved session.
+    stopApprovalWatch();
+    stopSessionWatch();
+    if(saveInFlight) setSaveLock(false);
+    $("#deadlineModal").hidden = true;
+    hideAppToast();
+    document.querySelectorAll(".shell, .mobile-bar").forEach(el => el.removeAttribute("inert"));
+    session = { token:"", username:"", displayName:"", role:"" };
+    await persistSession();
+    queries = [];                      // don't leave the ledger sitting in this browser
+    await persistQueriesLocalOnly();
+    resetForm();
+    renderAll();
+    updateSessionUI();
+    setSheetStatus("Not connected — sign in required", "error");
+  }
+
+  function leaveAccessRemoved(){
+    clearInterval(accessRemovedTimer);
+    $("#accessRemoved").hidden = true;
+    accessRemovedShown = false;
+    showLoginGate();
+    showSignupFormView();              // "create user" page
+  }
+
   async function sheetFetch(payload){
     const url = (settings.sheetUrl || "").trim();
     if(!url) throw new Error("Not connected to a Google Sheet.");
@@ -1421,7 +1561,7 @@
       body: JSON.stringify(Object.assign({ token: session.token }, payload))
     });
     const json = await res.json();
-    if(!json.ok) throw new Error(json.error || "Google Sheet request failed");
+    if(!json.ok){ notifyIfAccessRemoved(json.error); throw new Error(json.error || "Google Sheet request failed"); }
     return json;
   }
 
@@ -1430,7 +1570,7 @@
     if(!url) return null;
     const res = await fetch(url + (url.includes("?") ? "&" : "?") + "action=list&token=" + encodeURIComponent(session.token));
     const json = await res.json();
-    if(!json.ok) throw new Error(json.error || "Could not load from Google Sheet");
+    if(!json.ok){ notifyIfAccessRemoved(json.error); throw new Error(json.error || "Could not load from Google Sheet"); }
     return json.data || [];
   }
 
@@ -1488,6 +1628,92 @@
       btn.innerHTML = "&#128065;&#65039;"; // open eye — password is hidden
       btn.setAttribute("aria-label", "Show password");
     }
+  }
+
+  // ---------- Signup request tracking ----------
+  // The person who asked for an account isn't signed in, so the browser keeps
+  // their request id and asks the Sheet every 15 seconds what happened to it.
+  // Approval (or rejection) is announced with a notification and a sound, and
+  // on approval the login box is pre-filled with their User Name.
+  const PENDING_SIGNUP_KEY = "pendingSignup";
+  const SIGNUP_WATCH_MS = 15000;
+  const SIGNUP_WATCH_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+  let signupWatchTimer = null;
+  let toastAction = null;
+
+  function readPendingSignup(){
+    try{
+      const p = JSON.parse(localStorage.getItem(PENDING_SIGNUP_KEY) || "null");
+      if(p && p.requestId && Date.now() - (p.at || 0) < SIGNUP_WATCH_MAX_AGE_MS) return p;
+    }catch(e){}
+    return null;
+  }
+  function clearPendingSignup(){ try{ localStorage.removeItem(PENDING_SIGNUP_KEY); }catch(e){} }
+
+  function showAppToast(opts){
+    const toast = $("#appToast");
+    toast.classList.toggle("bad", !!opts.bad);
+    $("#appToastIcon").innerHTML = opts.bad ? "&#33;" : "&#10003;";
+    $("#appToastTitle").textContent = opts.title;
+    $("#appToastMsg").textContent = opts.message;
+    const actionBtn = $("#appToastAction");
+    actionBtn.style.display = opts.actionLabel ? "" : "none";
+    actionBtn.textContent = opts.actionLabel || "";
+    toastAction = opts.onAction || null;
+    toast.hidden = false;
+    playBuzzer(opts.bad ? "warning" : "success");
+  }
+  function hideAppToast(){ $("#appToast").hidden = true; }
+
+  async function checkSignupStatusOnce(){
+    const pending = readPendingSignup();
+    const url = (settings.sheetUrl || "").trim();
+    if(!pending || !url || session.token){ stopSignupWatch(); return; }
+    try{
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ action: "signupStatus", requestId: pending.requestId })
+      });
+      const json = await res.json();
+      if(!json.ok) return;
+      if(json.status === "Approved"){
+        stopSignupWatch();
+        clearPendingSignup();
+        showAppToast({
+          title: "Your account is approved",
+          message: pending.duplicate
+            ? "Welcome back, " + pending.username + ". Your password is now the one you requested — log in with it."
+            : "Welcome, " + pending.username + ". An admin or moderator approved your request — you can log in now.",
+          actionLabel: "Log in now",
+          onAction: () => {
+            hideAppToast();
+            showLoginFormView();
+            $("#login_username").value = pending.username;
+            $("#login_password").focus();
+          }
+        });
+      } else if(json.status === "Rejected"){
+        stopSignupWatch();
+        clearPendingSignup();
+        showAppToast({
+          bad: true,
+          title: "Your signup request was declined",
+          message: "An admin or moderator did not approve the request for \"" + pending.username + "\". Please contact them if this is unexpected."
+        });
+      } else if(json.status === "Unknown"){
+        stopSignupWatch();
+        clearPendingSignup();
+      }
+    }catch(err){ /* offline or backend busy — try again at the next check */ }
+  }
+
+  function stopSignupWatch(){ if(signupWatchTimer){ clearInterval(signupWatchTimer); signupWatchTimer = null; } }
+  function startSignupWatch(){
+    stopSignupWatch();
+    if(!readPendingSignup() || session.token) return;
+    checkSignupStatusOnce();
+    signupWatchTimer = setInterval(checkSignupStatusOnce, SIGNUP_WATCH_MS);
   }
 
   // After a signup request is sent, a full-page one-minute clock blocks the
@@ -1591,6 +1817,10 @@
 
       $("#signup_username").value = "";
       $("#signup_password").value = "";
+      if(json.requestId){
+        try{ localStorage.setItem(PENDING_SIGNUP_KEY, JSON.stringify({ requestId: json.requestId, username, duplicate: !!json.duplicate, at: Date.now() })); }catch(e){}
+        startSignupWatch();
+      }
       startSignupCooldown(json.duplicate
         ? "That name already has an account, so an admin or moderator will need to confirm it's you before you can log in."
         : "An admin or moderator needs to approve your request before you can log in.");
@@ -1714,9 +1944,11 @@
       hideLoginGate();
       loadAppearance();
       startApprovalWatch();
+      startSessionWatch();
       return true;
     }catch(err){
       stopApprovalWatch();
+      stopSessionWatch();
       session = { token:"", username:"", displayName:"", role:"" };
       await persistSession();
       setSheetStatus("Not connected — sign in required", "error");
@@ -1738,6 +1970,11 @@
       const result = await sheetLogin(username, password);
       session = { token: result.token, username, displayName: result.displayName || username, role: normalizeRole(result.role) };
       await persistSession();
+      const pendingReq = readPendingSignup();
+      if(pendingReq && String(pendingReq.username).toLowerCase() === username.toLowerCase()){
+        clearPendingSignup();        // they're in, so no approval notice is needed any more
+        stopSignupWatch();
+      }
       if(!settings.myName){
         settings.myName = session.displayName;
         $("#myNameInput").value = settings.myName;
@@ -1759,6 +1996,7 @@
 
   async function logout(){
     stopApprovalWatch();
+    stopSessionWatch();
     session = { token:"", username:"", displayName:"", role:"" };
     await persistSession();
     queries = [];
@@ -3514,6 +3752,12 @@
 
   function init(){
     initSoundAlerts();
+    $("#accessRemovedBtn").addEventListener("click", leaveAccessRemoved);
+    document.addEventListener("visibilitychange", () => { if(!document.hidden) pingSession(); });
+    window.addEventListener("online", pingSession);
+    $("#appToastAction").addEventListener("click", () => { if(toastAction) toastAction(); });
+    $("#appToastClose").addEventListener("click", hideAppToast);
+    startSignupWatch();
     if(!session.token && signupCooldownRemaining() > 0) showSignupCooldown();
     $("#deadlineAckCheck").addEventListener("change", (e) => {
       $("#deadlineModalAckBtn").disabled = !e.target.checked;
