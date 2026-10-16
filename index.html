@@ -349,7 +349,7 @@
   .view.active{display:block;}
 
   @media print{
-    .spine, .mobile-bar, .topbar .topbar-actions, .filter-bar, .row-actions, #newQueryBtnTop, #syncBtn, #loginGate{display:none !important;}
+    .spine, .mobile-bar, .topbar .topbar-actions, .filter-bar, .row-actions, #newQueryBtnTop, #syncBtn, #loginGate, .range-controls, .range-chips{display:none !important;}
     .main{padding:0;}
     .panel{border:none; box-shadow:none;}
     body{background:#fff;}
@@ -556,6 +556,30 @@
   .access-card p{margin:0 0 18px; font-size:16px; line-height:1.55; color:#F2D4CF;}
   .access-count{font-size:13px; color:#E7B7AF; margin-bottom:18px;}
 
+
+  /* ---------- Dashboard date range ---------- */
+  .range-bar{
+    background:var(--paper-card); border:1px solid var(--line-soft); border-radius:var(--radius);
+    padding:14px 16px; margin-bottom:18px; box-shadow:0 1px 2px rgba(0,0,0,0.03);
+  }
+  .range-head{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:10px;}
+  .range-title{font-family:'Fraunces',serif; font-weight:700; font-size:16px; color:var(--ink);}
+  .range-summary{font-size:12.5px; color:var(--ink-soft);}
+  .range-summary.active{color:var(--brass); font-weight:600;}
+  .range-controls{display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:12px;}
+  .range-field label{display:block; font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-soft); margin-bottom:4px;}
+  .range-field select, .range-field input{width:100%;}
+  .range-pair{display:flex; gap:8px;}
+  .range-pair select{flex:1; min-width:0;}
+  .range-chips{display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;}
+  .range-chip{
+    border:1px solid var(--line); background:var(--paper); color:var(--ink); border-radius:999px; padding:6px 14px;
+    font-size:12.5px; font-weight:600; cursor:pointer; transition:background-color .15s, border-color .15s, transform .12s;
+  }
+  .range-chip:hover{border-color:var(--brass); background:var(--brass-soft);}
+  .range-chip:active{transform:scale(.96);}
+  .range-chip.clear{color:var(--red); border-style:dashed;}
+
   /* Anyone who asks their device for less motion gets none — except the deadline
      blink and the save spinner, which are alerts rather than decoration. */
   @media (prefers-reduced-motion: reduce){
@@ -746,6 +770,52 @@
           <button class="btn ghost small" id="printBtn">&#128438; Print</button>
           <button class="btn ghost small" id="exportBtn">&#8659; Excel</button>
           <button class="btn primary small" id="newQueryBtnTop">&#43; New Query</button>
+        </div>
+      </div>
+
+      <div class="range-bar" id="rangeBar">
+        <div class="range-head">
+          <span class="range-title">&#128197; Date range</span>
+          <span class="range-summary" id="rangeSummary"></span>
+        </div>
+        <div class="range-controls">
+          <div class="range-field">
+            <label for="rangeField">Filter by</label>
+            <select id="rangeField">
+              <option value="approvalDate">Date Of Approval</option>
+              <option value="invoiceDate">Invoice Date</option>
+              <option value="checkIn">Check In Date</option>
+              <option value="checkOut">Check Out Date</option>
+              <option value="paymentDeadline">Payment Deadline</option>
+            </select>
+          </div>
+          <div class="range-field">
+            <label for="rangeMonth">Month</label>
+            <div class="range-pair">
+              <select id="rangeMonth">
+                <option value="">Any</option>
+                <option value="1">January</option><option value="2">February</option><option value="3">March</option>
+                <option value="4">April</option><option value="5">May</option><option value="6">June</option>
+                <option value="7">July</option><option value="8">August</option><option value="9">September</option>
+                <option value="10">October</option><option value="11">November</option><option value="12">December</option>
+              </select>
+              <select id="rangeYear" aria-label="Year"><option value="">Year</option></select>
+            </div>
+          </div>
+          <div class="range-field">
+            <label for="rangeFrom">From</label>
+            <input type="date" id="rangeFrom">
+          </div>
+          <div class="range-field">
+            <label for="rangeTo">To</label>
+            <input type="date" id="rangeTo">
+          </div>
+        </div>
+        <div class="range-chips">
+          <button type="button" class="range-chip" data-range="thisMonth">This month</button>
+          <button type="button" class="range-chip" data-range="lastMonth">Last month</button>
+          <button type="button" class="range-chip" data-range="thisYear">This year</button>
+          <button type="button" class="range-chip clear" data-range="clear">Clear</button>
         </div>
       </div>
 
@@ -2924,16 +2994,113 @@
     return parts.join(" ").toLowerCase();
   }
 
+  // ---------- Dashboard date range ----------
+  // Narrows the dashboard's totals, pills and Complete History to entries whose
+  // chosen date (default: Date Of Approval) falls in a From–To range or a whole
+  // month. Deadline Bookings Data is deliberately NOT narrowed, so an overdue
+  // payment can never be hidden by a date filter.
+  const RANGE_FIELD_LABELS = { approvalDate:"Date Of Approval", invoiceDate:"Invoice Date", checkIn:"Check In Date", checkOut:"Check Out Date", paymentDeadline:"Payment Deadline" };
+  const pad2 = (n) => String(n).padStart(2, "0");
+
+  function monthBounds(year, month){          // month: 1..12
+    const last = new Date(year, month, 0).getDate();
+    return { from: year + "-" + pad2(month) + "-01", to: year + "-" + pad2(month) + "-" + pad2(last) };
+  }
+
+  function rangeActive(){ return !!($("#rangeFrom").value || $("#rangeTo").value); }
+
+  function inDashRange(q){
+    const from = $("#rangeFrom").value, to = $("#rangeTo").value;
+    if(!from && !to) return true;
+    const v = cleanDateStr(q[$("#rangeField").value]).slice(0, 10);
+    if(!v) return false;                       // no date in this field, so it can't be in the range
+    if(from && v < from) return false;
+    if(to && v > to) return false;
+    return true;
+  }
+
+  function refreshRangeYears(){
+    const sel = $("#rangeYear");
+    if(!sel) return;
+    const keep = sel.value;
+    const now = new Date().getFullYear();
+    const years = new Set([now - 1, now, now + 1]);
+    visibleQueries().forEach(q => Object.keys(RANGE_FIELD_LABELS).forEach(f => {
+      const y = parseInt(cleanDateStr(q[f]).slice(0, 4), 10);
+      if(y > 1999 && y < 2100) years.add(y);
+    }));
+    const list = Array.from(years).sort((a, b) => b - a);
+    sel.innerHTML = '<option value="">Year</option>' + list.map(y => `<option value="${y}">${y}</option>`).join("");
+    sel.value = keep;
+  }
+
+  function applyMonthSelection(){
+    let m = parseInt($("#rangeMonth").value, 10) || 0;
+    let y = parseInt($("#rangeYear").value, 10) || 0;
+    if(!m && !y) return;
+    if(m && !y){ y = new Date().getFullYear(); $("#rangeYear").value = String(y); }
+    if(m){
+      const b = monthBounds(y, m);
+      $("#rangeFrom").value = b.from; $("#rangeTo").value = b.to;
+    } else {
+      $("#rangeFrom").value = y + "-01-01"; $("#rangeTo").value = y + "-12-31";
+    }
+    renderDashboard();
+  }
+
+  function onManualRange(){
+    let from = $("#rangeFrom").value, to = $("#rangeTo").value;
+    if(from && to && from > to){ [from, to] = [to, from]; $("#rangeFrom").value = from; $("#rangeTo").value = to; }
+    $("#rangeMonth").value = "";               // a hand-picked range isn't a month any more
+    $("#rangeYear").value = "";
+    renderDashboard();
+  }
+
+  function applyRangeChip(kind){
+    const now = new Date();
+    if(kind === "clear"){
+      $("#rangeFrom").value = ""; $("#rangeTo").value = ""; $("#rangeMonth").value = ""; $("#rangeYear").value = "";
+      renderDashboard(); return;
+    }
+    if(kind === "thisYear"){
+      $("#rangeMonth").value = ""; $("#rangeYear").value = String(now.getFullYear());
+    } else {
+      const d = kind === "lastMonth" ? new Date(now.getFullYear(), now.getMonth() - 1, 1) : now;
+      $("#rangeMonth").value = String(d.getMonth() + 1); $("#rangeYear").value = String(d.getFullYear());
+    }
+    applyMonthSelection();
+  }
+
+  function renderRangeSummary(visibleCount, matchCount, noDateCount){
+    const el = $("#rangeSummary");
+    if(!rangeActive()){ el.className = "range-summary"; el.textContent = "Showing all dates"; return; }
+    const from = $("#rangeFrom").value, to = $("#rangeTo").value;
+    const label = RANGE_FIELD_LABELS[$("#rangeField").value];
+    const span = from && to ? fmtDate(from) + " to " + fmtDate(to) : from ? "from " + fmtDate(from) + " onward" : "up to " + fmtDate(to);
+    let text = matchCount + " of " + visibleCount + (visibleCount === 1 ? " entry" : " entries") + " · " + label + " " + span;
+    if(noDateCount) text += " · " + noDateCount + (noDateCount === 1 ? " entry has" : " entries have") + " no " + label + " and " + (noDateCount === 1 ? "is" : "are") + " hidden";
+    el.className = "range-summary active";
+    el.textContent = text;
+  }
+
   function renderDashboard(){
     const term = ($("#dashSearch").value || "").toLowerCase().trim();
     const status = $("#dashStatusFilter").value;
-    let list = visibleQueries().filter(q => {
+    const visible = visibleQueries();
+    const inRange = visible.filter(inDashRange);
+    const noDate = rangeActive() ? visible.filter(q => !cleanDateStr(q[$("#rangeField").value])).length : 0;
+    renderRangeSummary(visible.length, inRange.length, noDate);
+    let list = inRange.filter(q => {
       const matchesTerm = !term || recordHaystack(q).includes(term);
       const matchesStatus = !status || q.status === status;
       return matchesTerm && matchesStatus;
     });
     renderStats(list);
     $("#dashTableBody").innerHTML = list.map(q => rowHtml(q,"dash")).join("");
+    const filtered = rangeActive() || term || status;
+    $("#dashEmpty").innerHTML = '<div class="glyph">§</div> ' + (filtered
+      ? "No entries match the current filters."
+      : "No queries yet — start with <strong>New Query</strong>.");
     $("#dashEmpty").style.display = list.length ? "none" : "block";
   }
 
@@ -3089,6 +3256,7 @@
 
   function renderAll(){
     refreshSuggestions();
+    refreshRangeYears();
     renderDashboard();
     renderDeadlineBookings();
     renderSearch();
@@ -3752,6 +3920,12 @@
 
   function init(){
     initSoundAlerts();
+    $("#rangeField").addEventListener("change", renderDashboard);
+    $("#rangeMonth").addEventListener("change", applyMonthSelection);
+    $("#rangeYear").addEventListener("change", applyMonthSelection);
+    $("#rangeFrom").addEventListener("change", onManualRange);
+    $("#rangeTo").addEventListener("change", onManualRange);
+    document.querySelectorAll(".range-chip").forEach(btn => btn.addEventListener("click", () => applyRangeChip(btn.dataset.range)));
     $("#accessRemovedBtn").addEventListener("click", leaveAccessRemoved);
     document.addEventListener("visibilitychange", () => { if(!document.hidden) pingSession(); });
     window.addEventListener("online", pingSession);
