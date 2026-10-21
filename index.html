@@ -580,6 +580,11 @@
   .range-chip:active{transform:scale(.96);}
   .range-chip.clear{color:var(--red); border-style:dashed;}
 
+
+  /* Brief red flash when a deadline reminder pops up. */
+  @keyframes dmFlash{0%,100%{background:var(--paper-card);} 50%{background:#F8C9C1;}}
+  .deadline-modal.flash{animation:fadeIn .2s ease, dmFlash .45s ease-in-out 6;}
+
   /* Anyone who asks their device for less motion gets none — except the deadline
      blink and the save spinner, which are alerts rather than decoration. */
   @media (prefers-reduced-motion: reduce){
@@ -2732,6 +2737,7 @@
     $("#deadlineModalScope").textContent = seeAll
       ? "Showing all users' bookings — you can see everything as " + session.role + "."
       : "Showing your own bookings (Handled By " + (session.displayName || session.username) + ").";
+    $("#deadlineModalScope").textContent += " This reminder repeats every 3 hours while you are signed in.";
     $("#deadlineAckCheck").checked = false;
     $("#deadlineModalAckBtn").disabled = true;
     $("#deadlineModalGoBtn").disabled = true;
@@ -2739,9 +2745,69 @@
     document.querySelectorAll(".shell, .mobile-bar").forEach(el => el.setAttribute("inert", ""));
     playBuzzer("deadline");
     $("#deadlineAckCheck").focus();
+
+    // Flash the whole popup for a moment, flash the tab title if the tab is in
+    // the background, and note when this reminder was shown (it restarts the
+    // 3-hour clock).
+    const modal = $("#deadlineModal");
+    modal.classList.remove("flash");
+    void modal.offsetWidth;                  // restart the animation if it is already playing
+    modal.classList.add("flash");
+    startTitleFlash();
+    markDeadlineReminderShown();
+  }
+
+  // ---------- Reminder every 3 hours ----------
+  // While someone is signed in, the same full-page reminder comes back every 3
+  // hours for the due bookings they can see (their own, or everyone's for an
+  // admin or moderator). The time of the last reminder is kept in the browser
+  // per person, so reloading the page doesn't reset the clock. Before it shows,
+  // the list is refreshed so entries already given Account Approval are skipped.
+  const DEADLINE_REMINDER_EVERY_MS = 3 * 60 * 60 * 1000;
+  const DEADLINE_REMINDER_CHECK_MS = 60 * 1000;
+  let reminderBusy = false;
+
+  function deadlineReminderKey(){ return "deadlineReminderLast:" + (session.username || "local"); }
+  function markDeadlineReminderShown(){ try{ localStorage.setItem(deadlineReminderKey(), String(Date.now())); }catch(e){} }
+  function lastDeadlineReminder(){ try{ return parseInt(localStorage.getItem(deadlineReminderKey()) || "0", 10) || 0; }catch(e){ return 0; } }
+
+  let titleFlashTimer = null;
+  const BASE_TITLE = document.title;
+  function stopTitleFlash(){ clearInterval(titleFlashTimer); titleFlashTimer = null; document.title = BASE_TITLE; }
+  function startTitleFlash(){
+    stopTitleFlash();
+    if(!document.hidden) return;
+    let on = false;
+    titleFlashTimer = setInterval(() => { on = !on; document.title = on ? "\u23F0 Payment deadline due!" : BASE_TITLE; }, 1000);
+  }
+
+  async function deadlineReminderTick(){
+    if(reminderBusy) return;
+    if(settings.sheetUrl && !session.token) return;                       // not signed in
+    if(!$("#deadlineModal").hidden || saveInFlight || accessRemovedShown) return;
+    if(Date.now() - lastDeadlineReminder() < DEADLINE_REMINDER_EVERY_MS) return;
+    reminderBusy = true;
+    try{
+      if(settings.sheetUrl && session.token){
+        try{
+          const remote = await sheetList();
+          queries = remote;
+          await persistQueriesLocalOnly();
+          renderAll();
+        }catch(err){ /* offline: remind from what we already have */ }
+      }
+      // Things may have changed while the list was loading.
+      if(!$("#deadlineModal").hidden || saveInFlight || accessRemovedShown) return;
+      if(settings.sheetUrl && !session.token) return;
+      const rows = collectDeadlineReminders();
+      if(!rows.length) return;                                            // nothing due: check again in a minute
+      pendingDeadlineRows = rows;
+      showDeadlineModal(rows);
+    }finally{ reminderBusy = false; }
   }
 
   function closeDeadlineModal(){
+    stopTitleFlash();
     $("#deadlineModal").hidden = true;
     if(!saveInFlight) document.querySelectorAll(".shell, .mobile-bar").forEach(el => el.removeAttribute("inert"));
   }
@@ -3083,6 +3149,20 @@
     el.textContent = text;
   }
 
+  // The search box and status filter on Complete History.
+  function matchesDashSearchAndStatus(q){
+    const term = ($("#dashSearch").value || "").toLowerCase().trim();
+    const status = $("#dashStatusFilter").value;
+    return (!term || recordHaystack(q).includes(term)) && (!status || q.status === status);
+  }
+
+  // Exactly what the dashboard is showing: the entries this person may see,
+  // narrowed by the date range, the search box and the status filter. The
+  // table, the totals and the Excel export all use this one definition.
+  function dashboardList(){
+    return visibleQueries().filter(inDashRange).filter(matchesDashSearchAndStatus);
+  }
+
   function renderDashboard(){
     const term = ($("#dashSearch").value || "").toLowerCase().trim();
     const status = $("#dashStatusFilter").value;
@@ -3090,11 +3170,7 @@
     const inRange = visible.filter(inDashRange);
     const noDate = rangeActive() ? visible.filter(q => !cleanDateStr(q[$("#rangeField").value])).length : 0;
     renderRangeSummary(visible.length, inRange.length, noDate);
-    let list = inRange.filter(q => {
-      const matchesTerm = !term || recordHaystack(q).includes(term);
-      const matchesStatus = !status || q.status === status;
-      return matchesTerm && matchesStatus;
-    });
+    let list = inRange.filter(matchesDashSearchAndStatus);
     renderStats(list);
     $("#dashTableBody").innerHTML = list.map(q => rowHtml(q,"dash")).join("");
     const filtered = rangeActive() || term || status;
@@ -3880,7 +3956,12 @@
   }
 
   function exportExcel(){
-    const rows = queries.map(q => {
+    const list = dashboardList();
+    if(!list.length){
+      alert("No entries match the current filters — there is nothing to export.");
+      return;
+    }
+    const rows = list.map(q => {
       const d = derive(q);
       const approved = (q.approvals || []).reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
       return {
@@ -3901,7 +3982,23 @@
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Query Ledger");
-    XLSX.writeFile(wb, "query-ledger-export.xlsx");
+
+    // A second sheet records which filters produced this file.
+    const from = $("#rangeFrom").value, to = $("#rangeTo").value;
+    const info = [
+      ["Exported by", session.displayName || session.username || "(local)"],
+      ["Exported on", fmtDate(localDateStr(new Date()))],
+      ["Entries exported", list.length],
+      ["Date filter field", rangeActive() ? RANGE_FIELD_LABELS[$("#rangeField").value] : "(none)"],
+      ["From", from ? fmtDate(from) : "(any)"],
+      ["To", to ? fmtDate(to) : "(any)"],
+      ["Status filter", $("#dashStatusFilter").value || "(all)"],
+      ["Search text", ($("#dashSearch").value || "").trim() || "(none)"]
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(info), "Export Info");
+
+    const stamp = rangeActive() ? "_" + (from ? fmtDate(from) : "start") + "_to_" + (to ? fmtDate(to) : "end") : "";
+    XLSX.writeFile(wb, "query-ledger-export" + stamp + ".xlsx");
   }
 
   function registerPwaWorker(){
@@ -3920,6 +4017,7 @@
 
   function init(){
     initSoundAlerts();
+    setInterval(deadlineReminderTick, DEADLINE_REMINDER_CHECK_MS);
     $("#rangeField").addEventListener("change", renderDashboard);
     $("#rangeMonth").addEventListener("change", applyMonthSelection);
     $("#rangeYear").addEventListener("change", applyMonthSelection);
@@ -3927,7 +4025,7 @@
     $("#rangeTo").addEventListener("change", onManualRange);
     document.querySelectorAll(".range-chip").forEach(btn => btn.addEventListener("click", () => applyRangeChip(btn.dataset.range)));
     $("#accessRemovedBtn").addEventListener("click", leaveAccessRemoved);
-    document.addEventListener("visibilitychange", () => { if(!document.hidden) pingSession(); });
+    document.addEventListener("visibilitychange", () => { if(!document.hidden){ stopTitleFlash(); pingSession(); } });
     window.addEventListener("online", pingSession);
     $("#appToastAction").addEventListener("click", () => { if(toastAction) toastAction(); });
     $("#appToastClose").addEventListener("click", hideAppToast);
