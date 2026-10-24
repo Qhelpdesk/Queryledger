@@ -720,7 +720,7 @@
     </div>
     <nav class="spine-nav">
       <button class="spine-tab active" data-view="dashboard"><span class="ic">&#9670;</span> Dashboard</button>
-      <button class="spine-tab" data-view="newquery"><span class="ic">&#43;</span> New Query</button>
+      <button class="spine-tab" data-view="newquery" id="newQueryTab"><span class="ic">&#43;</span> New Query</button>
       <button class="spine-tab" data-view="search"><span class="ic">&#128269;</span> Search / Edit</button>
       <button class="spine-tab" data-view="mine"><span class="ic">&#9776;</span> My Entries</button>
       <button class="spine-tab" data-view="signups" id="signupsTab" style="display:none;"><span class="ic">&#9989;</span> Signup Requests<span class="pending-badge" id="pendingSignupsBadge" style="display:none;"></span></button>
@@ -1323,6 +1323,7 @@
             <label>Role *</label>
             <select id="nu_role" required>
               <option value="restricted">Restricted (no delete, own entries only)</option>
+              <option value="boss">Boss (sees everything, read-only)</option>
               <option value="moderator">Moderator (full access, no admin panels)</option>
               <option value="admin">Admin</option>
             </select>
@@ -1471,13 +1472,15 @@
   let settings = { myName: "", sheetUrl: "" };
   let session = { token: "", username: "", displayName: "", role: "" };
 
-  // Three roles: "admin" (full access, incl. user management & appearance),
+  // Four roles: "boss" (sees everything like a moderator but is read-only:
+  // no new entries, edits, deletes or approvals, and no Signup Requests or
+  // User Access tabs), "admin" (full access, incl. user management & appearance),
   // "moderator" (same content access as admin — sees/edits everyone's
   // entries, can delete, can give Account Approval — but no admin panels),
   // and "restricted" (scoped to their own Handled By entries, can't delete).
   // Anything unrecognized defaults to the safest option, restricted.
   function normalizeRole(role){
-    return (role === "admin" || role === "moderator") ? role : "restricted";
+    return (role === "admin" || role === "moderator" || role === "boss") ? role : "restricted";
   }
   let editingId = null;
   let pendingApprovals = [];
@@ -1563,6 +1566,7 @@
   const SESSION_WATCH_MS = 6000;
   let sessionWatchTimer = null;
   let sessionPingInFlight = false;
+  let sessionPingPauseUntil = 0;
   let accessRemovedShown = false;
   let accessRemovedTimer = null;
 
@@ -1572,10 +1576,15 @@
 
   async function pingSession(){
     if(!session.token || !settings.sheetUrl || sessionPingInFlight || accessRemovedShown) return;
+    if(Date.now() < sessionPingPauseUntil) return;
     sessionPingInFlight = true;
     try{
       await sheetFetch({ action: "ping" });      // a removed account is caught inside sheetFetch
-    }catch(err){ /* offline, or an older backend without "ping" — try again next tick */ }
+    }catch(err){
+      // Offline, or an older backend without "ping": try again next tick. If Google is
+      // answering with error pages, stop pinging for a minute so we don't add to the load.
+      if(err && err.isBackendPage) sessionPingPauseUntil = Date.now() + 60000;
+    }
     finally{ sessionPingInFlight = false; }
   }
 
@@ -1627,6 +1636,39 @@
     showSignupFormView();              // "create user" page
   }
 
+  // Reads a reply from the Google Sheet backend as JSON. When Google sends back
+  // a web page instead (a sign-in page, an error page, "too many requests"),
+  // say what it actually was rather than the cryptic
+  // "Unexpected token '<' ... is not valid JSON".
+  function explainNonJson(text, status){
+    const plain = String(text).replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+    const snippet = plain.slice(0, 180);
+    if(/too many times|too many requests|quota|rate limit/i.test(plain)){
+      return "Google is limiting requests to the Google Sheet right now (too many in a short time). Wait a minute and try again.";
+    }
+    if(/accounts\.google\.com|sign in|authorization required|authorize/i.test(text)){
+      return "The Google Sheet backend is asking for a Google sign-in. In Apps Script open Deploy → Manage deployments → pencil, set \"Who has access\" to \"Anyone\", choose New version and click Deploy.";
+    }
+    if(/unable to open the file|page not found|couldn.t be found|doesn.t exist/i.test(plain)){
+      return "The Google Sheet backend link wasn't found. The Web App URL may be wrong, or its deployment was deleted.";
+    }
+    if(/\(line \d+|TypeError|ReferenceError|SyntaxError|Exception:/i.test(plain)){
+      return "The Google Sheet script crashed: " + snippet;
+    }
+    return "The Google Sheet backend sent back a web page instead of data (HTTP " + status + ")." + (snippet ? " It said: " + snippet : "");
+  }
+
+  async function readSheetJson(res){
+    const text = await res.text();
+    try{
+      return JSON.parse(text);
+    }catch(e){
+      const err = new Error(explainNonJson(text, res.status));
+      err.isBackendPage = true;
+      throw err;
+    }
+  }
+
   async function sheetFetch(payload){
     const url = (settings.sheetUrl || "").trim();
     if(!url) throw new Error("Not connected to a Google Sheet.");
@@ -1635,7 +1677,7 @@
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify(Object.assign({ token: session.token }, payload))
     });
-    const json = await res.json();
+    const json = await readSheetJson(res);
     if(!json.ok){ notifyIfAccessRemoved(json.error); throw new Error(json.error || "Google Sheet request failed"); }
     return json;
   }
@@ -1644,7 +1686,7 @@
     const url = (settings.sheetUrl || "").trim();
     if(!url) return null;
     const res = await fetch(url + (url.includes("?") ? "&" : "?") + "action=list&token=" + encodeURIComponent(session.token));
-    const json = await res.json();
+    const json = await readSheetJson(res);
     if(!json.ok){ notifyIfAccessRemoved(json.error); throw new Error(json.error || "Could not load from Google Sheet"); }
     return json.data || [];
   }
@@ -1657,7 +1699,7 @@
       headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({ action: "login", username, password })
     });
-    const json = await res.json();
+    const json = await readSheetJson(res);
     if(!json.ok) throw new Error(json.error || "Login failed");
     return json;
   }
@@ -1750,7 +1792,7 @@
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify({ action: "signupStatus", requestId: pending.requestId })
       });
-      const json = await res.json();
+      const json = await readSheetJson(res);
       if(!json.ok) return;
       if(json.status === "Approved"){
         stopSignupWatch();
@@ -1887,7 +1929,7 @@
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify({ action: "signup", username, password })
       });
-      const json = await res.json();
+      const json = await readSheetJson(res);
       if(!json.ok) throw new Error(json.error || "Could not submit account request.");
 
       $("#signup_username").value = "";
@@ -1954,8 +1996,10 @@
     const statusEl = $("#sessionStatus");
     statusEl.style.display = signedIn ? "block" : "none";
     statusEl.textContent = signedIn
-      ? ("Signed in as " + (session.displayName || session.username) + (session.role === "restricted" ? " (no delete access)" : session.role === "moderator" ? " (moderator)" : ""))
+      ? ("Signed in as " + (session.displayName || session.username) + (session.role === "restricted" ? " (no delete access)" : session.role === "moderator" ? " (moderator)" : session.role === "boss" ? " (view only)" : ""))
       : "";
+    $("#newQueryTab").style.display = session.role === "boss" ? "none" : "";
+    $("#newQueryBtnTop").style.display = session.role === "boss" ? "none" : "";
     $("#signupsTab").style.display = (signedIn && (session.role === "admin" || session.role === "moderator")) ? "flex" : "none";
     if(signedIn && (session.role === "admin" || session.role === "moderator")){ loadPendingSignups(); }
     $("#adminTab").style.display = (signedIn && (session.role === "admin" || session.role === "moderator")) ? "flex" : "none";
@@ -1969,8 +2013,11 @@
   }
 
   function canDelete(){
-    return !settings.sheetUrl || session.role !== "restricted";
+    return !settings.sheetUrl || (session.role !== "restricted" && session.role !== "boss");
   }
+
+  // The boss login is read-only: it can look at everything but never change it.
+  function canEditEntries(){ return session.role !== "boss"; }
 
   // A restricted user's identity is now fixed at signup (their User Name
   // doubles as their Handled By value) — no more prompting for it each
@@ -1986,6 +2033,7 @@
   }
 
   function canEditRecord(q){
+    if(session.role === "boss") return false;
     const identity = myIdentity();
     if(session.role !== "restricted" || !identity) return true;
     return (q.handledBy||"").trim().toLowerCase() === identity;
@@ -2249,7 +2297,7 @@
     try{
       const url = settings.sheetUrl.trim() + (settings.sheetUrl.includes("?") ? "&" : "?") + "action=getAppearance&token=" + encodeURIComponent(session.token);
       const res = await fetch(url);
-      const json = await res.json();
+      const json = await readSheetJson(res);
       sharedAppearance = (json.ok && json.appearance) ? Object.assign({}, DEFAULT_APPEARANCE, json.appearance) : DEFAULT_APPEARANCE;
       applyEffectiveAppearance();
       fillAppearanceForm(sharedAppearance);
@@ -2397,6 +2445,7 @@
         <td>
           <select data-role-for="${esc(u.username)}" ${roleLocked} ${isMod ? 'title="Only an admin can change roles"' : ""}>
             <option value="admin" ${u.role === "admin" ? "selected" : ""}>Admin</option>
+            <option value="boss" ${u.role === "boss" ? "selected" : ""}>Boss (read-only)</option>
             <option value="moderator" ${u.role === "moderator" ? "selected" : ""}>Moderator (no admin panels)</option>
             <option value="restricted" ${u.role === "restricted" ? "selected" : ""}>Restricted (no delete)</option>
           </select>
@@ -2664,7 +2713,7 @@
 
   function startApprovalWatch(){
     stopApprovalWatch();
-    if(!settings.sheetUrl || (session.role !== "admin" && session.role !== "moderator")) return;
+    if(!settings.sheetUrl || (session.role !== "admin" && session.role !== "moderator" && session.role !== "boss")) return;
     knownAttentionKeys = attentionKeys();
     approvalWatchTimer = setInterval(async () => {
       // Skip this tick if signed out, if the last sync is still running, or
@@ -2682,7 +2731,7 @@
         let fresh = false;
         current.forEach(k => { if(!knownAttentionKeys.has(k)) fresh = true; });
         knownAttentionKeys = current;
-        if(fresh) playBuzzer("deadline");
+        if(fresh && session.role !== "boss") playBuzzer("deadline");   // the boss can't approve, so no approval buzzer
       }catch(err){ /* transient network error — try again at the next tick */
       }finally{ syncInFlight = false; }
     }, SYNC_INTERVAL_MS);
@@ -2733,7 +2782,7 @@
         <td>${esc(r.handledBy) || "—"}</td>
         <td>${esc(fmtDate(r.deadline))}</td>
       </tr>`).join("");
-    const seeAll = session.role === "admin" || session.role === "moderator";
+    const seeAll = session.role === "admin" || session.role === "moderator" || session.role === "boss";
     $("#deadlineModalScope").textContent = seeAll
       ? "Showing all users' bookings — you can see everything as " + session.role + "."
       : "Showing your own bookings (Handled By " + (session.displayName || session.username) + ").";
@@ -3007,7 +3056,7 @@
         <td class="num ${profitInrClass}">₹${fmt(d.profitInr)}</td>
         <td class="num ${profitInrClass}">${fmtPct(d.profitPct)}</td>
         <td>${deadlineToday ? '&#9200; ' : ''}${esc(fmtDate(q.paymentDeadline))||"—"}</td>
-        <td class="row-actions"><button class="icon-btn" data-edit="${q.id}">Edit</button></td>
+        <td class="row-actions">${canEditEntries() ? `<button class="icon-btn" data-edit="${q.id}">Edit</button>` : ""}</td>
       </tr>`;
     } else if(mode === "search"){
       return `<tr data-id="${q.id}">
@@ -3024,7 +3073,7 @@
         <td class="num ${profitInrClass}">${fmtPct(d.profitPct)}</td>
         <td>${esc(q.handledBy)||"—"}</td>
         <td class="row-actions">
-          <button class="icon-btn" data-edit="${q.id}">Edit</button>
+          ${canEditEntries() ? `<button class="icon-btn" data-edit="${q.id}">Edit</button>` : ""}
           ${canDelete() ? `<button class="icon-btn" data-del="${q.id}">Delete</button>` : ""}
         </td>
       </tr>`;
@@ -3040,7 +3089,7 @@
         <td class="num">${fmt(d.sale)}</td>
         <td class="num ${profitInrClass}">₹${fmt(d.profitInr)}</td>
         <td class="num ${profitInrClass}">${fmtPct(d.profitPct)}</td>
-        <td class="row-actions"><button class="icon-btn" data-edit="${q.id}">Edit</button></td>
+        <td class="row-actions">${canEditEntries() ? `<button class="icon-btn" data-edit="${q.id}">Edit</button>` : ""}</td>
       </tr>`;
     }
   }
@@ -3671,7 +3720,7 @@
 
   function loadIntoForm(q){
     if(!canEditRecord(q)){
-      alert("You can only edit entries handled by you.");
+      alert(session.role === "boss" ? "This login is view-only — entries can't be edited." : "You can only edit entries handled by you.");
       return;
     }
     editingId = q.id;
@@ -3741,6 +3790,10 @@
   async function handleSubmit(e){
     e.preventDefault();
     if(saveInFlight) return;
+    if(session.role === "boss"){
+      alert("This login is view-only — it can't create or edit entries.");
+      return;
+    }
     const data = readForm();
     if(!data.code){ return; }
 
@@ -3944,6 +3997,7 @@
   }
 
   function switchView(view){
+    if(view === "newquery" && session.role === "boss") return;      // view-only login: no entry form at all
     $$(".spine-tab").forEach(t => t.classList.toggle("active", t.dataset.view === view));
     $$(".view").forEach(v => v.classList.remove("active"));
     $("#view-" + view).classList.add("active");
