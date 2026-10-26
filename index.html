@@ -585,6 +585,37 @@
   @keyframes dmFlash{0%,100%{background:var(--paper-card);} 50%{background:#F8C9C1;}}
   .deadline-modal.flash{animation:fadeIn .2s ease, dmFlash .45s ease-in-out 6;}
 
+
+  /* ---------- Doc status prompt (asked on every save) ---------- */
+  .doc-prompt{
+    position:fixed; inset:0; z-index:1600; display:flex; align-items:center; justify-content:center; padding:18px;
+    background:rgba(19,32,57,.55); animation:fadeIn .15s ease;
+  }
+  .doc-prompt[hidden]{display:none;}
+  .doc-prompt-card{
+    width:100%; max-width:480px; max-height:100%; overflow:auto; background:var(--paper-card); border-radius:14px;
+    padding:22px 22px 18px; box-shadow:0 24px 60px -12px rgba(0,0,0,.45); border-top:5px solid var(--brass);
+    animation:popIn .22s cubic-bezier(.2,.8,.2,1);
+  }
+  .doc-prompt-card h2{margin:0 0 6px; font-family:'Fraunces',serif; font-size:21px; color:var(--ink);}
+  .doc-prompt-sub{margin:0 0 14px; font-size:13px; color:var(--ink-soft); line-height:1.45;}
+  .doc-options{display:flex; flex-direction:column; gap:9px;}
+  .doc-option{
+    display:flex; align-items:center; gap:12px; padding:12px 14px; border:1.5px solid var(--line); border-radius:10px;
+    cursor:pointer; font-size:14.5px; font-weight:600; color:var(--ink); transition:border-color .15s, background-color .15s, transform .12s;
+  }
+  .doc-option:hover{border-color:var(--brass); background:var(--brass-soft);}
+  .doc-option:has(input:checked){border-color:var(--brass); background:var(--brass-soft); box-shadow:0 0 0 3px color-mix(in srgb, var(--brass) 20%, transparent);}
+  .doc-option input{width:18px; height:18px; accent-color:var(--brass); flex:none; margin:0;}
+  .doc-num{
+    width:24px; height:24px; flex:none; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:12px; font-weight:700; background:var(--paper); color:var(--ink-soft); border:1px solid var(--line);
+  }
+  .doc-history{margin-top:14px; font-size:12.5px; color:var(--ink-soft);}
+  .doc-history-title{font-size:10.5px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; margin-bottom:4px;}
+  .doc-history-line{padding:3px 0; border-bottom:1px dashed var(--line-soft);}
+  .doc-prompt-actions{display:flex; gap:10px; justify-content:flex-end; margin-top:16px;}
+
   /* Anyone who asks their device for less motion gets none — except the deadline
      blink and the save spinner, which are alerts rather than decoration. */
   @media (prefers-reduced-motion: reduce){
@@ -603,6 +634,23 @@
 </div>
 
 <div class="spine-overlay" id="spineOverlay"></div>
+
+<div class="doc-prompt" id="docPrompt" hidden role="dialog" aria-modal="true" aria-labelledby="docPromptTitle">
+  <form class="doc-prompt-card" id="docPromptForm">
+    <h2 id="docPromptTitle">Doc PP / PAN / Aadhaar status</h2>
+    <p class="doc-prompt-sub">Choose the current status before this entry is saved. Your answer is added to the earlier responses.</p>
+    <div class="doc-options" role="radiogroup" aria-label="Doc PP/PAN/Aadhaar status">
+      <label class="doc-option"><input type="radio" name="docStatusChoice" value="Yes provided"><span class="doc-num">1</span><span>Yes provided</span></label>
+      <label class="doc-option"><input type="radio" name="docStatusChoice" value="Not provided"><span class="doc-num">2</span><span>Not provided</span></label>
+      <label class="doc-option"><input type="radio" name="docStatusChoice" value="Docs will be available on final payment"><span class="doc-num">3</span><span>Docs will be available on final payment</span></label>
+    </div>
+    <div class="doc-history" id="docPromptHistory"></div>
+    <div class="doc-prompt-actions">
+      <button type="button" class="btn ghost" id="docPromptCancel">Cancel</button>
+      <button type="submit" class="btn primary" id="docPromptOk" disabled>Confirm &amp; Save</button>
+    </div>
+  </form>
+</div>
 
 <div class="access-removed" id="accessRemoved" hidden role="alertdialog" aria-live="assertive" aria-labelledby="accessRemovedTitle">
   <div class="access-card">
@@ -1060,12 +1108,9 @@
               </select>
             </div>
             <div class="field">
-              <label>Doc PP/PAN/Aadhaar Status *</label>
-              <select id="f_doc_status" required>
-                <option value="" disabled selected>-- Select --</option>
-                <option value="Yes">Yes</option>
-                <option value="No">No</option>
-              </select>
+              <label>Doc PP/PAN/Aadhaar Status</label>
+              <input type="text" id="f_doc_status" readonly placeholder="Asked each time you save">
+              <div class="hint">Latest response. You choose a new one every time you save.</div>
             </div>
             <div class="field">
               <label>Cost (<span id="costCurrencyLabel">USD</span>) *</label>
@@ -3098,7 +3143,7 @@
     const d = derive(q);
     const approvedTillDate = (q.approvals || []).reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
     const parts = [
-      q.code, q.status, q.paymentStatus, q.docStatus, q.savedAt, q.approvalDate, q.handledBy, q.invoiceDate, q.invoiceNumber,
+      q.code, q.status, q.paymentStatus, q.docStatus, q.docStatusLog, q.savedAt, q.approvalDate, q.handledBy, q.invoiceDate, q.invoiceNumber,
       q.agency, q.destination, q.vendor, q.checkIn, q.checkOut, q.serviceType, q.currency, q.costCenter,
       q.cost, q.sale, q.rate, q.costInr, q.saleInr, d.profit, d.profitInr,
       q.advanceInr, q.paymentDeadline, approvedTillDate, q.notes,
@@ -3787,6 +3832,43 @@
     if(on && document.activeElement && document.activeElement.blur) document.activeElement.blur();
   }
 
+  // ---------- Doc PP/PAN/Aadhaar status: asked on every save ----------
+  // Resolves to the chosen option, or null if the person backs out (in which
+  // case nothing is saved). Earlier responses are shown for reference; the new
+  // one is added to them, never replacing them.
+  function askDocStatus(historyText){
+    return new Promise(resolve => {
+      const modal = $("#docPrompt");
+      const form = $("#docPromptForm");
+      form.reset();
+      $("#docPromptOk").disabled = true;
+      const lines = String(historyText || "").split("\n").filter(Boolean);
+      $("#docPromptHistory").innerHTML = lines.length
+        ? '<div class="doc-history-title">Earlier responses</div>' + lines.slice(-5).reverse().map(l => `<div class="doc-history-line">${esc(l)}</div>`).join("")
+        : '<div class="doc-history-title">No earlier response yet</div>';
+      modal.hidden = false;
+      document.querySelectorAll(".shell, .mobile-bar").forEach(el => el.setAttribute("inert", ""));
+      playBuzzer("info");
+      const first = form.querySelector("input[name=docStatusChoice]");
+      if(first) first.focus();
+
+      const finish = (value) => {
+        modal.hidden = true;
+        if(!saveInFlight) document.querySelectorAll(".shell, .mobile-bar").forEach(el => el.removeAttribute("inert"));
+        form.onchange = null; form.onsubmit = null; modal.onkeydown = null; $("#docPromptCancel").onclick = null;
+        resolve(value);
+      };
+      form.onchange = () => { $("#docPromptOk").disabled = !form.querySelector("input[name=docStatusChoice]:checked"); };
+      form.onsubmit = (e) => {
+        e.preventDefault();
+        const picked = form.querySelector("input[name=docStatusChoice]:checked");
+        if(picked) finish(picked.value);
+      };
+      $("#docPromptCancel").onclick = () => finish(null);
+      modal.onkeydown = (e) => { if(e.key === "Escape") finish(null); };
+    });
+  }
+
   async function handleSubmit(e){
     e.preventDefault();
     if(saveInFlight) return;
@@ -3875,6 +3957,15 @@
       alert("Notice: Cost is greater than sale (Booking in loss).");
     }
 
+    // Every save, new entry or edit, asks for the Doc PP/PAN/Aadhaar status.
+    const priorDocLog = editingId ? ((queries.find(q => q.id === editingId) || {}).docStatusLog || "") : "";
+    const docChoice = await askDocStatus(priorDocLog);
+    if(docChoice === null){
+      $("#saveMsg").style.color = "var(--red)";
+      $("#saveMsg").textContent = "Not saved — choose the Doc PP/PAN/Aadhaar status to save.";
+      return;
+    }
+
     data.approvals = pendingApprovals.slice();
     const derivedAtSave = derive(data);
     data.costInr = derivedAtSave.costInr;
@@ -3888,6 +3979,13 @@
     const timestamp = now.toLocaleDateString(undefined, { day:"2-digit", month:"short", year:"numeric" }) +
                        " " + now.toLocaleTimeString(undefined, { hour:"2-digit", minute:"2-digit" });
     data.savedAt = timestamp;
+
+    // The response is stored as the latest status AND added to the history.
+    const docWho = session.displayName || session.username || data.handledBy || "user";
+    const docEntry = fmtDate(localDateStr(now)) + " " + now.toLocaleTimeString(undefined, { hour:"2-digit", minute:"2-digit" }) + " — " + docWho + ": " + docChoice;
+    data.docStatus = docChoice;
+    data.docStatusEntry = docEntry;                                    // the server appends this to the stored history
+    data.docStatusLog = priorDocLog ? priorDocLog + "\n" + docEntry : docEntry;   // local copy until the next sync
 
     if(editingId){
       const idx = queries.findIndex(q => q.id === editingId);
@@ -3942,7 +4040,9 @@
       }
 
       const idx2 = queries.findIndex(q => q.id === record.id);
-      if(idx2 > -1){ queries[idx2] = record; } else { queries.push(record); }
+      const localRecord = Object.assign({}, record);
+      delete localRecord.docStatusEntry;
+      if(idx2 > -1){ queries[idx2] = localRecord; } else { queries.push(localRecord); }
       await persistQueriesLocalOnly();
       renderAll();
       renderEditLog();
@@ -4019,7 +4119,7 @@
       const d = derive(q);
       const approved = (q.approvals || []).reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
       return {
-        "Query Code": q.code, "Booking Status": q.status, "Payment Status": q.paymentStatus || "", "Doc PP/PAN/Aadhaar Status": q.docStatus || "", "Date Of Approval": q.approvalDate, "Handled By": q.handledBy,
+        "Query Code": q.code, "Booking Status": q.status, "Payment Status": q.paymentStatus || "", "Doc PP/PAN/Aadhaar Status": q.docStatus || "", "Doc PP/PAN/Aadhaar Responses (History)": q.docStatusLog || "", "Date Of Approval": q.approvalDate, "Handled By": q.handledBy,
         "Invoice Date": q.invoiceDate, "Invoice Number": q.invoiceNumber, "Agency Name": q.agency,
         "Destination": q.destination, "Vendor Name": q.vendor, "Check In Date": q.checkIn, "Check Out Date": q.checkOut,
         "Service Type": q.serviceType, "Currency Name": q.currency, "Infozeal Cost Center": q.costCenter || "",
