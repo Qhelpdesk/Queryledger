@@ -2436,8 +2436,8 @@
     const isMod = session.role === "moderator";
     $("#usersTableBody").innerHTML = users.map(u => {
       const roleLocked = isMod ? "disabled" : "";                                  // moderators never change roles
-      const rowLocked = (isMod && u.role === "admin") ? "disabled" : "";           // ...or touch admin accounts
-      const lockTip = rowLocked ? ' title="Moderators can\'t change admin accounts"' : "";
+      const rowLocked = (isMod && (u.role === "admin" || u.role === "boss")) ? "disabled" : "";   // ...or touch admin / boss accounts
+      const lockTip = rowLocked ? ' title="Moderators can\'t change ' + u.role + ' accounts"' : "";
       return `
       <tr data-username="${esc(u.username)}">
         <td><strong>${esc(u.username)}</strong>${u.username === session.username ? " (you)" : ""}</td>
