@@ -467,6 +467,10 @@
   .dm-badge.passed{background:#7A1414; color:#fff; animation:dmPulse 1.2s ease-in-out infinite;}
   .dm-badge.today{background:var(--red); color:#fff;}
   .dm-badge.tomorrow{background:var(--amber); color:#fff;}
+  .dm-badge.docs{background:var(--paper); color:var(--ink-soft); border:1px solid var(--line);}
+  .dm-doc{display:inline-block; padding:2px 9px; border-radius:999px; font-size:11.5px; font-weight:700;}
+  .dm-doc.pending{background:var(--red-soft); color:var(--red);}
+  .dm-doc.ok{background:var(--green-soft); color:var(--green);}
   .dm-badge.soon{background:var(--amber-soft); color:#7A5314;}
   @keyframes dmPulse{0%,100%{opacity:1;} 50%{opacity:.55;}}
   .dm-actions{
@@ -611,6 +615,11 @@
     width:24px; height:24px; flex:none; border-radius:50%; display:flex; align-items:center; justify-content:center;
     font-size:12px; font-weight:700; background:var(--paper); color:var(--ink-soft); border:1px solid var(--line);
   }
+  .doc-warn{
+    background:var(--red-soft); color:var(--red); border:1px solid #E8B5AD; border-left:5px solid var(--red);
+    border-radius:8px; padding:10px 12px; margin-bottom:12px; font-size:13.5px; font-weight:600; line-height:1.45;
+  }
+  .doc-warn[hidden]{display:none;}
   .doc-history{margin-top:14px; font-size:12.5px; color:var(--ink-soft);}
   .doc-history-title{font-size:10.5px; font-weight:700; letter-spacing:.07em; text-transform:uppercase; margin-bottom:4px;}
   .doc-history-line{padding:3px 0; border-bottom:1px dashed var(--line-soft);}
@@ -638,12 +647,9 @@
 <div class="doc-prompt" id="docPrompt" hidden role="dialog" aria-modal="true" aria-labelledby="docPromptTitle">
   <form class="doc-prompt-card" id="docPromptForm">
     <h2 id="docPromptTitle">Doc PP / PAN / Aadhaar status</h2>
-    <p class="doc-prompt-sub">Choose the current status before this entry is saved. Your answer is added to the earlier responses.</p>
-    <div class="doc-options" role="radiogroup" aria-label="Doc PP/PAN/Aadhaar status">
-      <label class="doc-option"><input type="radio" name="docStatusChoice" value="Yes provided"><span class="doc-num">1</span><span>Yes provided</span></label>
-      <label class="doc-option"><input type="radio" name="docStatusChoice" value="Not provided"><span class="doc-num">2</span><span>Not provided</span></label>
-      <label class="doc-option"><input type="radio" name="docStatusChoice" value="Docs will be available on final payment"><span class="doc-num">3</span><span>Docs will be available on final payment</span></label>
-    </div>
+    <div class="doc-warn" id="docPromptWarn" hidden role="alert"></div>
+    <p class="doc-prompt-sub" id="docPromptSub"></p>
+    <div class="doc-options" id="docOptions" role="radiogroup" aria-label="Doc PP/PAN/Aadhaar status"></div>
     <div class="doc-history" id="docPromptHistory"></div>
     <div class="doc-prompt-actions">
       <button type="button" class="btn ghost" id="docPromptCancel">Cancel</button>
@@ -703,7 +709,7 @@
     </div>
     <div class="dm-body">
       <table class="dm-table">
-        <thead><tr><th>Status</th><th>Query Code</th><th>Agency</th><th>Handled By</th><th>Payment Deadline</th></tr></thead>
+        <thead><tr><th>Status</th><th>Query Code</th><th>Agency</th><th>Handled By</th><th>Payment Deadline</th><th>Documents</th><th></th></tr></thead>
         <tbody id="deadlineModalBody"></tbody>
       </table>
     </div>
@@ -945,7 +951,7 @@
             <thead>
               <tr>
                 <th>Query Code</th><th>Booking Status</th><th>Handled By</th><th>Agency</th><th>Destination</th>
-                <th>Payment Deadline</th><th>Deadline Date after RM Approval</th><th>Status</th><th>Cost</th><th>Sale</th><th>Accounts Remark</th><th></th>
+                <th>Payment Deadline</th><th>Deadline Date after RM Approval</th><th>Status</th><th>Docs</th><th>Cost</th><th>Sale</th><th>Accounts Remark</th><th></th>
               </tr>
             </thead>
             <tbody id="deadlineTableBody"></tbody>
@@ -1110,7 +1116,7 @@
             <div class="field">
               <label>Doc PP/PAN/Aadhaar Status</label>
               <input type="text" id="f_doc_status" readonly placeholder="Asked each time you save">
-              <div class="hint">Latest response. You choose a new one every time you save.</div>
+              <div class="hint">Latest response. The choices depend on the Payment Deadline Date, and you pick one every time you save.</div>
             </div>
             <div class="field">
               <label>Cost (<span id="costCurrencyLabel">USD</span>) *</label>
@@ -2791,7 +2797,7 @@
   // only sees the entries they can see.
   function collectDeadlineReminders(){
     const today = localDateStr(new Date());
-    const rank = { passed: 0, today: 1, tomorrow: 2, soon: 3 };
+    const rank = { passed: 0, today: 1, tomorrow: 2, soon: 3, docs: 4 };
     const rows = [];
     visibleQueries().forEach(q => {
       const dl = cleanDateStr(q.paymentDeadline);
@@ -2803,21 +2809,27 @@
       else if(diff === 0){ kind = "today"; label = "Payment due today"; }
       else if(diff === 1){ kind = "tomorrow"; label = "Payment due tomorrow"; }
       else if(diff === 2){ kind = "soon"; label = "Payment due in 2 days"; }
+      // 3–12 days out is only worth a reminder if the documents are still pending.
+      else if(diff <= DOC_WINDOW_DAYS && !docsProvided(q)){ kind = "docs"; label = "Payment due in " + diff + " days"; }
       else return;
-      rows.push({ kind, label, code: q.code, agency: q.agency, handledBy: q.handledBy, deadline: dl });
+      rows.push({ kind, label, id: q.id, code: q.code, agency: q.agency, handledBy: q.handledBy, deadline: dl,
+                  docsPending: !docsProvided(q), docStatus: q.docStatus || "" });
     });
     rows.sort((a, b) => rank[a.kind] - rank[b.kind] || a.deadline.localeCompare(b.deadline) || String(a.code).localeCompare(String(b.code)));
     return rows;
   }
 
   function showDeadlineModal(rows){
-    const counts = { passed: 0, today: 0, tomorrow: 0, soon: 0 };
+    const counts = { passed: 0, today: 0, tomorrow: 0, soon: 0, docs: 0 };
     rows.forEach(r => counts[r.kind]++);
+    const docsPendingCount = rows.filter(r => r.docsPending).length;
     const parts = [];
     if(counts.passed)   parts.push(counts.passed + " passed");
     if(counts.today)    parts.push(counts.today + " due today");
     if(counts.tomorrow) parts.push(counts.tomorrow + " due tomorrow");
     if(counts.soon)     parts.push(counts.soon + " due in 2 days");
+    if(counts.docs)     parts.push(counts.docs + " due within " + DOC_WINDOW_DAYS + " days");
+    if(docsPendingCount) parts.push(docsPendingCount + " with documents pending");
     $("#deadlineModalSub").textContent = rows.length + (rows.length === 1 ? " entry needs" : " entries need") + " attention — " + parts.join(" · ");
     $("#deadlineModalBody").innerHTML = rows.map(r => `
       <tr class="dm-row ${r.kind}">
@@ -2826,6 +2838,10 @@
         <td>${esc(r.agency) || "—"}</td>
         <td>${esc(r.handledBy) || "—"}</td>
         <td>${esc(fmtDate(r.deadline))}</td>
+        <td>${r.docsPending
+          ? `<span class="dm-doc pending" title="${esc(r.docStatus || "No response yet")}">Pending</span>`
+          : `<span class="dm-doc ok">Provided</span>`}</td>
+        <td>${(r.docsPending && canEditEntries()) ? `<button type="button" class="icon-btn" data-doc-edit="${esc(r.id)}" disabled>Update docs</button>` : ""}</td>
       </tr>`).join("");
     const seeAll = session.role === "admin" || session.role === "moderator" || session.role === "boss";
     $("#deadlineModalScope").textContent = seeAll
@@ -3322,6 +3338,9 @@
         <td>${esc(fmtDate(dl))||"—"}</td>
         <td>${esc(fmtDate(q.rmDeadline))||"—"}</td>
         <td>${esc(statusLabel)}</td>
+        <td>${docsProvided(q)
+          ? `<span class="dm-doc ok" title="${esc(q.docStatus)}">Provided</span>`
+          : `<span class="dm-doc pending" title="${esc(q.docStatus || "No response yet")}">Pending</span>`}</td>
         <td class="num">${fmt(d.cost)}</td>
         <td class="num">${fmt(d.sale)}</td>
         <td>${esc(q.accountsRemark)||"—"}</td>
@@ -3833,22 +3852,68 @@
   }
 
   // ---------- Doc PP/PAN/Aadhaar status: asked on every save ----------
-  // Resolves to the chosen option, or null if the person backs out (in which
-  // case nothing is saved). Earlier responses are shown for reference; the new
-  // one is added to them, never replacing them.
-  function askDocStatus(historyText){
+  // The choices depend on how close the Payment Deadline Date is (counted from
+  // today, the day of this save):
+  //   more than 12 days away -> "Only Holding / Part payment" or "All Docs on final payment"
+  //   within the next 12 days (or already passed) -> a warning that documents are
+  //     pending, and "Yes, provided to accounts" or "I take responsibility of
+  //     delayed vendor payment".
+  // No payment deadline at all is treated as "more than 12 days away".
+  const DOC_WINDOW_DAYS = 12;
+  const DOC_OPTIONS_FAR  = ["Only Holding / Part payment", "All Docs on final payment"];
+  const DOC_OPTIONS_NEAR = ["Yes, provided to accounts", "I take responsibility of delayed vendor payment"];
+
+  function daysUntil(dateStr){
+    const dl = cleanDateStr(dateStr).slice(0, 10);
+    if(!dl) return null;
+    return Math.round((new Date(dl) - new Date(localDateStr(new Date()))) / 86400000);
+  }
+  function docContext(deadline){
+    const days = daysUntil(deadline);
+    return { days, near: days !== null && days <= DOC_WINDOW_DAYS, deadline: cleanDateStr(deadline).slice(0, 10) };
+  }
+  function describeDays(days){
+    if(days < 0) return "overdue by " + (-days) + (days === -1 ? " day" : " days");
+    if(days === 0) return "today";
+    if(days === 1) return "tomorrow";
+    return "in " + days + " days";
+  }
+  // Documents count as handed over only once someone has answered "Yes…".
+  function docsProvided(q){ return /^yes/i.test(String(q.docStatus || "").trim()); }
+
+  // Resolves to the chosen option, or null if the person backs out (nothing is
+  // saved then). Earlier responses are shown for reference; the new one is
+  // added to them, never replacing them.
+  function askDocStatus(historyText, ctx){
     return new Promise(resolve => {
       const modal = $("#docPrompt");
       const form = $("#docPromptForm");
-      form.reset();
+      const options = ctx.near ? DOC_OPTIONS_NEAR : DOC_OPTIONS_FAR;
+
+      const warn = $("#docPromptWarn");
+      if(ctx.near){
+        warn.textContent = "Warning: the payment deadline (" + fmtDate(ctx.deadline) + ") is " + describeDays(ctx.days) +
+          ". Documents (PP / PAN / Aadhaar) are still pending — please confirm where they stand.";
+        warn.hidden = false;
+        $("#docPromptSub").textContent = "Choose one to continue. Your answer is added to the earlier responses.";
+      } else {
+        warn.hidden = true;
+        $("#docPromptSub").textContent = ctx.days === null
+          ? "No payment deadline is set. Choose how the documents will follow. Your answer is added to the earlier responses."
+          : "The payment deadline (" + fmtDate(ctx.deadline) + ") is " + ctx.days + " days away, so choose how the documents will follow. Your answer is added to the earlier responses.";
+      }
+      $("#docOptions").innerHTML = options.map((text, i) => `
+        <label class="doc-option"><input type="radio" name="docStatusChoice" value="${esc(text)}"><span class="doc-num">${i + 1}</span><span>${esc(text)}</span></label>`).join("");
       $("#docPromptOk").disabled = true;
+
       const lines = String(historyText || "").split("\n").filter(Boolean);
       $("#docPromptHistory").innerHTML = lines.length
         ? '<div class="doc-history-title">Earlier responses</div>' + lines.slice(-5).reverse().map(l => `<div class="doc-history-line">${esc(l)}</div>`).join("")
         : '<div class="doc-history-title">No earlier response yet</div>';
+
       modal.hidden = false;
       document.querySelectorAll(".shell, .mobile-bar").forEach(el => el.setAttribute("inert", ""));
-      playBuzzer("info");
+      playBuzzer(ctx.near ? "warning" : "info");        // pending documents near the deadline get the warning sound
       const first = form.querySelector("input[name=docStatusChoice]");
       if(first) first.focus();
 
@@ -3959,7 +4024,7 @@
 
     // Every save, new entry or edit, asks for the Doc PP/PAN/Aadhaar status.
     const priorDocLog = editingId ? ((queries.find(q => q.id === editingId) || {}).docStatusLog || "") : "";
-    const docChoice = await askDocStatus(priorDocLog);
+    const docChoice = await askDocStatus(priorDocLog, docContext(data.paymentDeadline));
     if(docChoice === null){
       $("#saveMsg").style.color = "var(--red)";
       $("#saveMsg").textContent = "Not saved — choose the Doc PP/PAN/Aadhaar status to save.";
@@ -4188,6 +4253,16 @@
     $("#deadlineAckCheck").addEventListener("change", (e) => {
       $("#deadlineModalAckBtn").disabled = !e.target.checked;
       $("#deadlineModalGoBtn").disabled = !e.target.checked;
+      document.querySelectorAll("#deadlineModalBody [data-doc-edit]").forEach(b => { b.disabled = !e.target.checked; });
+    });
+    $("#deadlineModalBody").addEventListener("click", (e) => {
+      const btn = e.target.closest && e.target.closest("[data-doc-edit]");
+      if(!btn || btn.disabled) return;
+      const id = btn.getAttribute("data-doc-edit");
+      acknowledgeDeadlines(false).then(() => {
+        const q = queries.find(x => x.id === id);
+        if(q) loadIntoForm(q);
+      });
     });
     $("#deadlineModalAckBtn").addEventListener("click", () => acknowledgeDeadlines(false));
     $("#deadlineModalGoBtn").addEventListener("click", () => acknowledgeDeadlines(true));
