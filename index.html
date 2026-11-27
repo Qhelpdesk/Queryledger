@@ -4309,7 +4309,18 @@
         if(cell && typeof cell.v === "number") cell.z = "dd-mm-yyyy";
       }
     });
-    ws["!cols"] = headers.map(h => EXCEL_DATE_HEADERS.indexOf(h) > -1 ? { wch: 14 } : {});
+    // Every column gets an explicit width. (A column with no width is drawn
+    // collapsed in Excel, which is what made most columns look hidden.)
+    ws["!cols"] = headers.map(h => {
+      if(EXCEL_DATE_HEADERS.indexOf(h) > -1) return { wch: 14 };
+      let longest = h.length;
+      rows.forEach(r => {
+        const v = r[h];
+        if(v === null || v === undefined || v === "") return;
+        String(v).split("\n").forEach(line => { if(line.length > longest) longest = line.length; });
+      });
+      return { wch: Math.min(Math.max(longest + 2, 10), 45) };
+    });
     XLSX.utils.book_append_sheet(wb, ws, "Query Ledger");
 
     // A second sheet records which filters produced this file.
@@ -4325,7 +4336,9 @@
       ["Status filter", $("#dashStatusFilter").value || "(all)"],
       ["Search text", ($("#dashSearch").value || "").trim() || "(none)"]
     ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(info), "Export Info");
+    const infoWs = XLSX.utils.aoa_to_sheet(info);
+    infoWs["!cols"] = [{ wch: 24 }, { wch: 60 }];
+    XLSX.utils.book_append_sheet(wb, infoWs, "Export Info");
 
     const stamp = rangeActive() ? "_" + (from ? fmtDate(from) : "start") + "_to_" + (to ? fmtDate(to) : "end") : "";
     XLSX.writeFile(wb, "query-ledger-export" + stamp + ".xlsx");
