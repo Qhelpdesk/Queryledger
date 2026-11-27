@@ -349,7 +349,7 @@
   .view.active{display:block;}
 
   @media print{
-    .spine, .mobile-bar, .topbar .topbar-actions, .filter-bar, .row-actions, #newQueryBtnTop, #syncBtn, #loginGate, .range-controls, .range-chips{display:none !important;}
+    .spine, .mobile-bar, .topbar .topbar-actions, .filter-bar, .row-actions, #newQueryBtnTop, #syncBtn, #loginGate, .range-controls, .range-chips, .cc-filter{display:none !important;}
     .main{padding:0;}
     .panel{border:none; box-shadow:none;}
     body{background:#fff;}
@@ -625,6 +625,24 @@
   .doc-history-line{padding:3px 0; border-bottom:1px dashed var(--line-soft);}
   .doc-prompt-actions{display:flex; gap:10px; justify-content:flex-end; margin-top:16px;}
 
+
+  /* ---------- Cost-center filter ---------- */
+  .cc-filter{margin-top:14px;}
+  .cc-head{display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin-bottom:6px;}
+  .cc-head label{font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--ink-soft);}
+  .cc-actions{font-size:12px; color:var(--ink-soft);}
+  .link-btn{border:none; background:none; padding:0 2px; color:var(--brass); font-weight:600; font-size:12px; cursor:pointer; text-decoration:underline;}
+  .cc-chips{display:flex; flex-wrap:wrap; gap:8px;}
+  .cc-chip{
+    display:inline-flex; align-items:center; gap:7px; padding:5px 12px; border:1px solid var(--line); border-radius:999px;
+    background:var(--paper); font-size:12.5px; font-weight:600; color:var(--ink-soft); cursor:pointer; user-select:none;
+    transition:background-color .15s, border-color .15s, color .15s, transform .12s;
+  }
+  .cc-chip:hover{border-color:var(--brass);}
+  .cc-chip:active{transform:scale(.96);}
+  .cc-chip.on{background:var(--brass-soft); border-color:var(--brass); color:var(--ink);}
+  .cc-chip input{accent-color:var(--brass); width:15px; height:15px; margin:0; cursor:pointer;}
+
   /* Anyone who asks their device for less motion gets none — except the deadline
      blink and the save spinner, which are alerts rather than decoration. */
   @media (prefers-reduced-motion: reduce){
@@ -869,6 +887,17 @@
             <label for="rangeTo">To</label>
             <input type="date" id="rangeTo">
           </div>
+        </div>
+        <div class="cc-filter" id="ccFilter">
+          <div class="cc-head">
+            <label>Infozeal Cost Center</label>
+            <span class="cc-actions">
+              <button type="button" class="link-btn" id="ccAll">Select all</button>
+              <span aria-hidden="true">&middot;</span>
+              <button type="button" class="link-btn" id="ccNone">Deselect all</button>
+            </span>
+          </div>
+          <div class="cc-chips" id="ccChips"></div>
         </div>
         <div class="range-chips">
           <button type="button" class="range-chip" data-range="thisMonth">This month</button>
@@ -3247,14 +3276,73 @@
     applyMonthSelection();
   }
 
+  // ---------- Infozeal Cost Center filter ----------
+  // Every cost center starts selected. Un-ticking one hides its entries from
+  // the dashboard, its totals and the Excel export. The un-ticked ones are what
+  // gets remembered, so a cost center that appears later is selected by default.
+  const CC_NONE = "__none__";                   // stands for entries with no cost center (kept plain text so it survives being stored in an HTML attribute)
+  const ccDeselected = new Set();
+  function ccKey(q){ const v = String(q.costCenter || "").trim().toLowerCase(); return v || CC_NONE; }
+
+  function costCenterOptions(){
+    const map = new Map();
+    visibleQueries().forEach(q => {
+      const k = ccKey(q);
+      if(!map.has(k)) map.set(k, { key: k, label: k === CC_NONE ? "(Not set)" : String(q.costCenter).trim() });
+    });
+    COST_CENTER_DEFAULTS.forEach(v => { const k = v.toLowerCase(); if(!map.has(k)) map.set(k, { key: k, label: v }); });
+    return Array.from(map.values()).sort((a, b) =>
+      (a.key === CC_NONE) - (b.key === CC_NONE) || a.label.localeCompare(b.label));
+  }
+
+  function inCostCenterFilter(q){ return !ccDeselected.has(ccKey(q)); }
+  function costCenterFilterActive(){ return ccDeselected.size > 0; }
+  function selectedCostCenterLabels(){ return costCenterOptions().filter(o => !ccDeselected.has(o.key)).map(o => o.label); }
+
+  function refreshCostCenterFilter(){
+    const box = $("#ccChips");
+    if(!box) return;
+    const opts = costCenterOptions();
+    const present = new Set(opts.map(o => o.key));
+    Array.from(ccDeselected).forEach(k => { if(!present.has(k)) ccDeselected.delete(k); });   // forget centers that no longer exist
+    box.innerHTML = opts.map(o => {
+      const on = !ccDeselected.has(o.key);
+      return `<label class="cc-chip${on ? " on" : ""}"><input type="checkbox" data-cc="${esc(o.key)}" ${on ? "checked" : ""}><span>${esc(o.label)}</span></label>`;
+    }).join("");
+  }
+
+  function onCostCenterToggle(e){
+    const box = e.target.closest && e.target.closest("input[data-cc]");
+    if(!box) return;
+    const key = box.getAttribute("data-cc");
+    if(box.checked) ccDeselected.delete(key); else ccDeselected.add(key);
+    box.closest(".cc-chip").classList.toggle("on", box.checked);
+    renderDashboard();
+  }
+
+  function setAllCostCenters(selected){
+    ccDeselected.clear();
+    if(!selected) costCenterOptions().forEach(o => ccDeselected.add(o.key));
+    refreshCostCenterFilter();
+    renderDashboard();
+  }
+
   function renderRangeSummary(visibleCount, matchCount, noDateCount){
     const el = $("#rangeSummary");
-    if(!rangeActive()){ el.className = "range-summary"; el.textContent = "Showing all dates"; return; }
-    const from = $("#rangeFrom").value, to = $("#rangeTo").value;
-    const label = RANGE_FIELD_LABELS[$("#rangeField").value];
-    const span = from && to ? fmtDate(from) + " to " + fmtDate(to) : from ? "from " + fmtDate(from) + " onward" : "up to " + fmtDate(to);
-    let text = matchCount + " of " + visibleCount + (visibleCount === 1 ? " entry" : " entries") + " · " + label + " " + span;
-    if(noDateCount) text += " · " + noDateCount + (noDateCount === 1 ? " entry has" : " entries have") + " no " + label + " and " + (noDateCount === 1 ? "is" : "are") + " hidden";
+    const dateOn = rangeActive(), ccOn = costCenterFilterActive();
+    if(!dateOn && !ccOn){ el.className = "range-summary"; el.textContent = "Showing all dates and cost centers"; return; }
+    let text = matchCount + " of " + visibleCount + (visibleCount === 1 ? " entry" : " entries");
+    if(dateOn){
+      const from = $("#rangeFrom").value, to = $("#rangeTo").value;
+      const label = RANGE_FIELD_LABELS[$("#rangeField").value];
+      const span = from && to ? fmtDate(from) + " to " + fmtDate(to) : from ? "from " + fmtDate(from) + " onward" : "up to " + fmtDate(to);
+      text += " · " + label + " " + span;
+      if(noDateCount) text += " · " + noDateCount + (noDateCount === 1 ? " entry has" : " entries have") + " no " + label + " and " + (noDateCount === 1 ? "is" : "are") + " hidden";
+    }
+    if(ccOn){
+      const chosen = selectedCostCenterLabels();
+      text += " · Cost Center: " + (!chosen.length ? "none selected" : chosen.length > 4 ? chosen.length + " of " + costCenterOptions().length + " selected" : chosen.join(", "));
+    }
     el.className = "range-summary active";
     el.textContent = text;
   }
@@ -3270,20 +3358,21 @@
   // narrowed by the date range, the search box and the status filter. The
   // table, the totals and the Excel export all use this one definition.
   function dashboardList(){
-    return visibleQueries().filter(inDashRange).filter(matchesDashSearchAndStatus);
+    return visibleQueries().filter(inDashRange).filter(inCostCenterFilter).filter(matchesDashSearchAndStatus);
   }
 
   function renderDashboard(){
     const term = ($("#dashSearch").value || "").toLowerCase().trim();
     const status = $("#dashStatusFilter").value;
     const visible = visibleQueries();
-    const inRange = visible.filter(inDashRange);
-    const noDate = rangeActive() ? visible.filter(q => !cleanDateStr(q[$("#rangeField").value])).length : 0;
+    const byCenter = visible.filter(inCostCenterFilter);
+    const inRange = byCenter.filter(inDashRange);
+    const noDate = rangeActive() ? byCenter.filter(q => !cleanDateStr(q[$("#rangeField").value])).length : 0;
     renderRangeSummary(visible.length, inRange.length, noDate);
     let list = inRange.filter(matchesDashSearchAndStatus);
     renderStats(list);
     $("#dashTableBody").innerHTML = list.map(q => rowHtml(q,"dash")).join("");
-    const filtered = rangeActive() || term || status;
+    const filtered = rangeActive() || costCenterFilterActive() || term || status;
     $("#dashEmpty").innerHTML = '<div class="glyph">§</div> ' + (filtered
       ? "No entries match the current filters."
       : "No queries yet — start with <strong>New Query</strong>.");
@@ -3446,6 +3535,7 @@
   function renderAll(){
     refreshSuggestions();
     refreshRangeYears();
+    refreshCostCenterFilter();
     renderDashboard();
     renderDeadlineBookings();
     renderSearch();
@@ -4174,6 +4264,16 @@
     toggleMobileDrawer(false);
   }
 
+  // Date columns in the Excel file are real Excel dates (so they sort and filter
+  // as dates) displayed as DD-MM-YYYY. The serial number is worked out directly
+  // from the yyyy-mm-dd text, so no time zone can shift a date by a day.
+  const EXCEL_DATE_HEADERS = ["Date Of Approval", "Invoice Date", "Check In Date", "Check Out Date", "Payment Deadline Date", "Deadline Date after RM Approval"];
+  function excelDateSerial(val){
+    const m = String(cleanDateStr(val) || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if(!m) return "";
+    return Math.round((Date.UTC(+m[1], +m[2] - 1, +m[3]) - Date.UTC(1899, 11, 30)) / 86400000);
+  }
+
   function exportExcel(){
     const list = dashboardList();
     if(!list.length){
@@ -4184,22 +4284,32 @@
       const d = derive(q);
       const approved = (q.approvals || []).reduce((s,a) => s + (parseFloat(a.amount)||0), 0);
       return {
-        "Query Code": q.code, "Booking Status": q.status, "Payment Status": q.paymentStatus || "", "Doc PP/PAN/Aadhaar Status": q.docStatus || "", "Doc PP/PAN/Aadhaar Responses (History)": q.docStatusLog || "", "Date Of Approval": q.approvalDate, "Handled By": q.handledBy,
-        "Invoice Date": q.invoiceDate, "Invoice Number": q.invoiceNumber, "Agency Name": q.agency,
-        "Destination": q.destination, "Vendor Name": q.vendor, "Check In Date": q.checkIn, "Check Out Date": q.checkOut,
+        "Query Code": q.code, "Booking Status": q.status, "Payment Status": q.paymentStatus || "", "Doc PP/PAN/Aadhaar Status": q.docStatus || "", "Doc PP/PAN/Aadhaar Responses (History)": q.docStatusLog || "", "Date Of Approval": excelDateSerial(q.approvalDate), "Handled By": q.handledBy,
+        "Invoice Date": excelDateSerial(q.invoiceDate), "Invoice Number": q.invoiceNumber, "Agency Name": q.agency,
+        "Destination": q.destination, "Vendor Name": q.vendor, "Check In Date": excelDateSerial(q.checkIn), "Check Out Date": excelDateSerial(q.checkOut),
         "Service Type": q.serviceType, "Currency Name": q.currency, "Infozeal Cost Center": q.costCenter || "",
         "Cost (USD/AED)": d.cost, "Sale (USD/AED)": d.sale,
         "Exchange Rate (INR)": d.rate, "Supplier Payment Approval till date": approved,
         "Cost (INR)": d.costInr, "Sale (INR)": d.saleInr,
         "Profit (USD/AED)": d.profit, "Profit (INR)": d.profitInr, "INR Profit %": Number(d.profitPct.toFixed(2)),
         "Advance Received (INR)": q.advanceInr || 0, "Remaining Payment Due": d.saleInr - (parseFloat(q.advanceInr) || 0),
-        "Payment Deadline Date": q.paymentDeadline || "",
-        "RM Approval": q.rmApproval || "", "RM Name": q.rmName || "", "Deadline Date after RM Approval": q.rmDeadline || "",
+        "Payment Deadline Date": excelDateSerial(q.paymentDeadline),
+        "RM Approval": q.rmApproval || "", "RM Name": q.rmName || "", "Deadline Date after RM Approval": excelDateSerial(q.rmDeadline),
         "Notes": q.notes
       };
     });
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
+    const headers = Object.keys(rows[0]);
+    EXCEL_DATE_HEADERS.forEach(h => {
+      const c = headers.indexOf(h);
+      if(c < 0) return;
+      for(let r = 1; r <= rows.length; r++){
+        const cell = ws[XLSX.utils.encode_cell({ r, c })];
+        if(cell && typeof cell.v === "number") cell.z = "dd-mm-yyyy";
+      }
+    });
+    ws["!cols"] = headers.map(h => EXCEL_DATE_HEADERS.indexOf(h) > -1 ? { wch: 14 } : {});
     XLSX.utils.book_append_sheet(wb, ws, "Query Ledger");
 
     // A second sheet records which filters produced this file.
@@ -4211,6 +4321,7 @@
       ["Date filter field", rangeActive() ? RANGE_FIELD_LABELS[$("#rangeField").value] : "(none)"],
       ["From", from ? fmtDate(from) : "(any)"],
       ["To", to ? fmtDate(to) : "(any)"],
+      ["Infozeal Cost Center", costCenterFilterActive() ? (selectedCostCenterLabels().join(", ") || "(none selected)") : "(all)"],
       ["Status filter", $("#dashStatusFilter").value || "(all)"],
       ["Search text", ($("#dashSearch").value || "").trim() || "(none)"]
     ];
@@ -4237,6 +4348,9 @@
   function init(){
     initSoundAlerts();
     setInterval(deadlineReminderTick, DEADLINE_REMINDER_CHECK_MS);
+    $("#ccChips").addEventListener("change", onCostCenterToggle);
+    $("#ccAll").addEventListener("click", () => setAllCostCenters(true));
+    $("#ccNone").addEventListener("click", () => setAllCostCenters(false));
     $("#rangeField").addEventListener("change", renderDashboard);
     $("#rangeMonth").addEventListener("change", applyMonthSelection);
     $("#rangeYear").addEventListener("change", applyMonthSelection);
